@@ -19,7 +19,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,15 +60,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -149,7 +146,7 @@ class MainActivity : ComponentActivity() {
 
                         if (isEpub) {
                             val chapters = extractEpubChapters(context, uri)
-                            val count = chapters.size.coerceAtLeast(1)
+                            val count = if (chapters.isNotEmpty()) chapters.size else 1
                             val newBook = BookItem(
                                 uriString = uri.toString(),
                                 title = title,
@@ -235,9 +232,9 @@ class MainActivity : ComponentActivity() {
                                 saveBooks(context, currentList)
                                 isScanning = false
                                 scanNotice = if (addedCount > 0) {
-                                    "Added $addedCount new PDF(s). Tap '+ Add Book' to pick from any folder."
+                                    "Added $addedCount new PDF(s). Tap '+ Add Book' for any folder."
                                 } else {
-                                    "Scan complete (${foundUris.size} found). Tap '+ Add Book' to select PDFs or EPUBs."
+                                    "Scan done (${foundUris.size} found). Tap '+ Add Book' for PDFs/EPUBs."
                                 }
                             }
                         }.start()
@@ -274,7 +271,6 @@ class MainActivity : ComponentActivity() {
                         }
 
                         var zoomScale by remember(currentBook.uriString) { mutableStateOf(1f) }
-                        var panOffset by remember(currentBook.uriString) { mutableStateOf(Offset.Zero) }
 
                         Column(
                             modifier = Modifier
@@ -311,9 +307,8 @@ class MainActivity : ComponentActivity() {
                             ) {
                                 OutlinedButton(
                                     onClick = {
-                                        val nextZoom = (zoomScale - 0.25f).coerceIn(0.75f, 3.5f)
-                                        zoomScale = nextZoom
-                                        if (nextZoom <= 1f) panOffset = Offset.Zero
+                                        val next = zoomScale - 0.25f
+                                        zoomScale = if (next < 0.75f) 0.75f else next
                                     }
                                 ) {
                                     Text("Zoom -")
@@ -324,16 +319,14 @@ class MainActivity : ComponentActivity() {
                                 )
                                 OutlinedButton(
                                     onClick = {
-                                        zoomScale = (zoomScale + 0.25f).coerceIn(0.75f, 3.5f)
+                                        val next = zoomScale + 0.25f
+                                        zoomScale = if (next > 2.5f) 2.5f else next
                                     }
                                 ) {
                                     Text("Zoom +")
                                 }
                                 OutlinedButton(
-                                    onClick = {
-                                        zoomScale = 1f
-                                        panOffset = Offset.Zero
-                                    }
+                                    onClick = { zoomScale = 1f }
                                 ) {
                                     Text("Reset")
                                 }
@@ -359,9 +352,16 @@ class MainActivity : ComponentActivity() {
                                         Text("Could not read readable text from this EPUB.")
                                     }
                                 } else {
-                                    val startChapter = currentBook.lastPage.coerceIn(0, epubChapters.size - 1)
+                                    val maxIdx = epubChapters.size - 1
+                                    val safeStart = if (currentBook.lastPage < 0) {
+                                        0
+                                    } else if (currentBook.lastPage > maxIdx) {
+                                        maxIdx
+                                    } else {
+                                        currentBook.lastPage
+                                    }
                                     val pagerState = rememberPagerState(
-                                        initialPage = startChapter,
+                                        initialPage = safeStart,
                                         pageCount = { epubChapters.size }
                                     )
 
@@ -387,7 +387,6 @@ class MainActivity : ComponentActivity() {
 
                                     HorizontalPager(
                                         state = pagerState,
-                                        userScrollEnabled = zoomScale <= 1.01f,
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxWidth()
@@ -395,29 +394,13 @@ class MainActivity : ComponentActivity() {
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxSize()
-                                                .pointerInput(zoomScale) {
-                                                    detectTransformGestures { _, pan, zoom, _ ->
-                                                        val newZoom = (zoomScale * zoom).coerceIn(0.75f, 3.5f)
-                                                        zoomScale = newZoom
-                                                        if (newZoom > 1f) {
-                                                            panOffset = panOffset + pan
-                                                        } else {
-                                                            panOffset = Offset.Zero
-                                                        }
-                                                    }
-                                                }
-                                                .graphicsLayer(
-                                                    scaleX = zoomScale,
-                                                    scaleY = zoomScale,
-                                                    translationX = panOffset.x,
-                                                    translationY = panOffset.y
-                                                )
                                                 .verticalScroll(rememberScrollState())
                                                 .padding(8.dp)
                                         ) {
                                             Text(
                                                 text = epubChapters[chapIndex],
-                                                style = MaterialTheme.typography.bodyLarge
+                                                fontSize = (16f * zoomScale).sp,
+                                                lineHeight = (24f * zoomScale).sp
                                             )
                                         }
                                     }
@@ -470,9 +453,16 @@ class MainActivity : ComponentActivity() {
                                     Text("Could not open this PDF file.")
                                 }
                             } else {
-                                val startPage = currentBook.lastPage.coerceIn(0, readerPages.size - 1)
+                                val maxIdx = readerPages.size - 1
+                                val safeStart = if (currentBook.lastPage < 0) {
+                                    0
+                                } else if (currentBook.lastPage > maxIdx) {
+                                    maxIdx
+                                } else {
+                                    currentBook.lastPage
+                                }
                                 val pagerState = rememberPagerState(
-                                    initialPage = startPage,
+                                    initialPage = safeStart,
                                     pageCount = { readerPages.size }
                                 )
 
@@ -498,38 +488,28 @@ class MainActivity : ComponentActivity() {
 
                                 HorizontalPager(
                                     state = pagerState,
-                                    userScrollEnabled = zoomScale <= 1.01f,
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
                                 ) { pageIndex ->
                                     val pageBmp: Bitmap = readerPages[pageIndex]
+                                    val imgWidthFraction = if (zoomScale < 0.5f) {
+                                        0.5f
+                                    } else if (zoomScale > 1f) {
+                                        1f
+                                    } else {
+                                        zoomScale
+                                    }
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .pointerInput(zoomScale) {
-                                                detectTransformGestures { _, pan, zoom, _ ->
-                                                    val newZoom = (zoomScale * zoom).coerceIn(0.75f, 3.5f)
-                                                    zoomScale = newZoom
-                                                    if (newZoom > 1f) {
-                                                        panOffset = panOffset + pan
-                                                    } else {
-                                                        panOffset = Offset.Zero
-                                                    }
-                                                }
-                                            }
-                                            .graphicsLayer(
-                                                scaleX = zoomScale,
-                                                scaleY = zoomScale,
-                                                translationX = panOffset.x,
-                                                translationY = panOffset.y
-                                            ),
+                                            .verticalScroll(rememberScrollState()),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Image(
                                             bitmap = pageBmp.asImageBitmap(),
                                             contentDescription = "Page ${pageIndex + 1}",
-                                            modifier = Modifier.fillMaxSize(),
+                                            modifier = Modifier.fillMaxWidth(imgWidthFraction),
                                             contentScale = ContentScale.Fit
                                         )
                                     }
@@ -623,7 +603,7 @@ class MainActivity : ComponentActivity() {
                                     onClick = { scanDevicePdfs() },
                                     enabled = !isScanning
                                 ) {
-                                    Text(if (isScanning) "Scanning..." : "Scan PDFs")
+                                    Text(if (isScanning) "Scanning..." else "Scan PDFs")
                                 }
                                 OutlinedButton(
                                     onClick = { viewMode = LibraryViewMode.GRID_2 }
@@ -669,12 +649,13 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier.fillMaxSize(),
                                     contentAlignment = Alignment.Center
                                 ) {
+                                    val emptyText = if (books.isEmpty()) {
+                                        "Your shelf is empty.\nTap 'Scan PDFs' or '+ Add Book' to import PDFs and EPUBs."
+                                    } else {
+                                        "No matching books found."
+                                    }
                                     Text(
-                                        text = if (books.isEmpty()) {
-                                            "Your shelf is empty.\nTap 'Scan PDFs' or '+ Add Book' to import PDFs and EPUBs."
-                                        } else {
-                                            "No matching books found."
-                                        },
+                                        text = emptyText,
                                         style = MaterialTheme.typography.bodyLarge
                                     )
                                 }
@@ -685,10 +666,14 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier.fillMaxSize()
                                 ) {
                                     items(filteredBooks, key = { it.uriString }) { book ->
-                                        val progress = if (book.pageCount > 0) {
+                                        val rawProg = if (book.pageCount > 0) {
                                             (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
-                                        } else 0f
-                                        val percent = (progress * 100).toInt().coerceIn(0, 100)
+                                        } else {
+                                            0f
+                                        }
+                                        val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
+                                        val percent = (progress * 100).toInt()
+                                        val unitLabel = if (book.format == "EPUB") "sec" else "pages"
 
                                         Card(
                                             modifier = Modifier
@@ -714,13 +699,13 @@ class MainActivity : ComponentActivity() {
                                                     )
                                                     Spacer(modifier = Modifier.height(4.dp))
                                                     Text(
-                                                        text = "$percent% read • ${book.pageCount} ${if (book.format == "EPUB") "sec" else "pages"}",
+                                                        text = "$percent% read • ${book.pageCount} $unitLabel",
                                                         style = MaterialTheme.typography.bodySmall,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
                                                     Spacer(modifier = Modifier.height(6.dp))
                                                     LinearProgressIndicator(
-                                                        progress = progress.coerceIn(0f, 1f),
+                                                        progress = progress,
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .height(4.dp)
@@ -752,10 +737,13 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier.fillMaxSize()
                                 ) {
                                     items(filteredBooks, key = { it.uriString }) { book ->
-                                        val progress = if (book.pageCount > 0) {
+                                        val rawProg = if (book.pageCount > 0) {
                                             (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
-                                        } else 0f
-                                        val percent = (progress * 100).toInt().coerceIn(0, 100)
+                                        } else {
+                                            0f
+                                        }
+                                        val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
+                                        val percent = (progress * 100).toInt()
 
                                         Card(
                                             modifier = Modifier
@@ -802,7 +790,7 @@ class MainActivity : ComponentActivity() {
                                                 Spacer(modifier = Modifier.height(4.dp))
 
                                                 LinearProgressIndicator(
-                                                    progress = progress.coerceIn(0f, 1f),
+                                                    progress = progress,
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .height(4.dp)
@@ -861,6 +849,7 @@ class MainActivity : ComponentActivity() {
         return result
     }
 
+    @Suppress("DEPRECATION")
     private fun extractEpubChapters(context: Context, uri: Uri): List<String> {
         val chapters = mutableListOf<String>()
         try {
@@ -879,9 +868,7 @@ class MainActivity : ComponentActivity() {
                                     read = zip.read(tmp)
                                 }
                                 val rawHtml = buffer.toString("UTF-8")
-                                val plainText = Html.fromHtml(rawHtml, Html.FROM_HTML_MODE_LEGACY)
-                                    .toString()
-                                    .trim()
+                                val plainText = Html.fromHtml(rawHtml).toString().trim()
                                 if (plainText.isNotBlank()) {
                                     chapters.add(plainText)
                                 }
