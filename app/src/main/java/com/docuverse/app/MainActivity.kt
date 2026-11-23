@@ -113,8 +113,8 @@ class MainActivity : ComponentActivity() {
                     var isLoadingReader by remember { mutableStateOf(false) }
 
                     LaunchedEffect(books.size) {
-                        val needsCover = books.filter { it.format == "PDF" && it.cover == null }
-                        if (needsCover.isNotEmpty()) {
+                        val needsCover = books.any { it.format == "PDF" && it.cover == null }
+                        if (needsCover) {
                             Thread {
                                 val updatedList = books.map { b ->
                                     if (b.format == "PDF" && b.cover == null) {
@@ -208,7 +208,8 @@ class MainActivity : ComponentActivity() {
                             val currentList = books.toMutableList()
                             for (u in foundUris) {
                                 val uriStr = u.toString()
-                                if (currentList.none { it.uriString == uriStr }) {
+                                val alreadyExists = currentList.any { it.uriString == uriStr }
+                                if (!alreadyExists) {
                                     val title = getRawFileName(context, u)
                                         .removeSuffix(".pdf").removeSuffix(".PDF")
                                     val count = getPdfPageCount(context, u)
@@ -236,7 +237,7 @@ class MainActivity : ComponentActivity() {
                                 scanNotice = if (addedCount > 0) {
                                     "Added $addedCount new PDF(s). Tap '+ Add Book' to pick from any folder."
                                 } else {
-                                    "Scan done (${foundUris.size} found). Tap '+ Add Book' to select PDFs or EPUBs from any folder."
+                                    "Scan complete (${foundUris.size} found). Tap '+ Add Book' to select PDFs or EPUBs."
                                 }
                             }
                         }.start()
@@ -301,7 +302,6 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            // Zoom controls row
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -378,7 +378,7 @@ class MainActivity : ComponentActivity() {
                                     }
 
                                     Text(
-                                        text = "Section ${pagerState.currentPage + 1} of${epubChapters.size} (EPUB)",
+                                        text = "Section ${pagerState.currentPage + 1} of ${epubChapters.size} (EPUB)",
                                         style = MaterialTheme.typography.labelLarge,
                                         modifier = Modifier.align(Alignment.CenterHorizontally)
                                     )
@@ -489,7 +489,7 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 Text(
-                                    text = "Page ${pagerState.currentPage + 1} of${readerPages.size}",
+                                    text = "Page ${pagerState.currentPage + 1} of ${readerPages.size}",
                                     style = MaterialTheme.typography.labelLarge,
                                     modifier = Modifier.align(Alignment.CenterHorizontally)
                                 )
@@ -614,6 +614,403 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Scanner + View Mode switcher row
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = { scanDevicePdfs() },
+                                    enabled = !isScanning
+                                ) {
+                                    Text(if (isScanning) "Scanning..." : "Scan PDFs")
+                                }
+                                OutlinedButton(
+                                    onClick = { viewMode = LibraryViewMode.GRID_2 }
+                                ) {
+                                    Text(if (viewMode == LibraryViewMode.GRID_2) "[2-Grid]" else "2-Grid")
+                                }
+                                OutlinedButton(
+                                    onClick = { viewMode = LibraryViewMode.GRID_3 }
+                                ) {
+                                    Text(if (viewMode == LibraryViewMode.GRID_3) "[3-Grid]" else "3-Grid")
+                                }
+                                OutlinedButton(
+                                    onClick = { viewMode = LibraryViewMode.LIST }
+                                ) {
+                                    Text(if (viewMode == LibraryViewMode.LIST) "[List]" else "List")
+                                }
+                            }
+
+                            if (scanNotice.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = scanNotice,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Search PDFs and EPUBs...") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            if (filteredBooks.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (books.isEmpty()) {
+                                            "Your shelf is empty.\nTap 'Scan PDFs' or '+ Add Book' to import PDFs and EPUBs."
+                                        } else {
+                                            "No matching books found."
+                                        },
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                }
+                            } else if (viewMode == LibraryViewMode.LIST) {
+                                LazyColumn(
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    contentPadding = PaddingValues(bottom = 24.dp),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    items(filteredBooks, key = { it.uriString }) { book ->
+                                        val progress = if (book.pageCount > 0) {
+                                            (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
+                                        } else 0f
+                                        val percent = (progress * 100).toInt().coerceIn(0, 100)
+
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { openBook(book) },
+                                            shape = RoundedCornerShape(10.dp),
+                                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(12.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "[${book.format}] ${book.title}",
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        text = "$percent% read • ${book.pageCount} ${if (book.format == "EPUB") "sec" else "pages"}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    LinearProgressIndicator(
+                                                        progress = progress.coerceIn(0f, 1f),
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(4.dp)
+                                                            .clip(RoundedCornerShape(2.dp))
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Text(
+                                                    text = "Remove",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.clickable {
+                                                        val updated = books.filter { it.uriString != book.uriString }
+                                                        books = updated
+                                                        saveBooks(context, updated)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                val cols = if (viewMode == LibraryViewMode.GRID_3) 3 else 2
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(cols),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    contentPadding = PaddingValues(bottom = 24.dp),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    items(filteredBooks, key = { it.uriString }) { book ->
+                                        val progress = if (book.pageCount > 0) {
+                                            (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
+                                        } else 0f
+                                        val percent = (progress * 100).toInt().coerceIn(0, 100)
+
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { openBook(book) },
+                                            shape = RoundedCornerShape(12.dp),
+                                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp)) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .aspectRatio(0.72f)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    val coverBmp = book.cover
+                                                    if (coverBmp != null) {
+                                                        Image(
+                                                            bitmap = coverBmp.asImageBitmap(),
+                                                            contentDescription = book.title,
+                                                            modifier = Modifier.fillMaxSize(),
+                                                            contentScale = ContentScale.Crop
+                                                        )
+                                                    } else {
+                                                        Text(
+                                                            text = book.format,
+                                                            style = MaterialTheme.typography.titleMedium
+                                                        )
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.height(6.dp))
+
+                                                Text(
+                                                    text = book.title,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+
+                                                Spacer(modifier = Modifier.height(4.dp))
+
+                                                LinearProgressIndicator(
+                                                    progress = progress.coerceIn(0f, 1f),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(4.dp)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                )
+
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "$percent% • ${book.pageCount}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    Text(
+                                                        text = "Del",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.clickable {
+                                                            val updated = books.filter { it.uriString != book.uriString }
+                                                            books = updated
+                                                            saveBooks(context, updated)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun queryMediaStorePdfs(context: Context): List<Uri> {
+        val result = mutableListOf<Uri>()
+        try {
+            val collection = MediaStore.Files.getContentUri("external")
+            val projection = arrayOf(MediaStore.Files.FileColumns._ID)
+            val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} = ? OR LOWER(${MediaStore.Files.FileColumns.DISPLAY_NAME}) LIKE ?"
+            val selectionArgs = arrayOf("application/pdf", "%.pdf")
+            context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndex(MediaStore.Files.FileColumns._ID)
+                while (cursor.moveToNext() && idCol >= 0) {
+                    val id = cursor.getLong(idCol)
+                    result.add(Uri.withAppendedPath(collection, id.toString()))
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return result
+    }
+
+    private fun extractEpubChapters(context: Context, uri: Uri): List<String> {
+        val chapters = mutableListOf<String>()
+        try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                ZipInputStream(inputStream).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory) {
+                            val lower = entry.name.lowercase()
+                            if (lower.endsWith(".xhtml") || lower.endsWith(".html") || lower.endsWith(".htm")) {
+                                val buffer = ByteArrayOutputStream()
+                                val tmp = ByteArray(4096)
+                                var read = zip.read(tmp)
+                                while (read != -1) {
+                                    buffer.write(tmp, 0, read)
+                                    read = zip.read(tmp)
+                                }
+                                val rawHtml = buffer.toString("UTF-8")
+                                val plainText = Html.fromHtml(rawHtml, Html.FROM_HTML_MODE_LEGACY)
+                                    .toString()
+                                    .trim()
+                                if (plainText.isNotBlank()) {
+                                    chapters.add(plainText)
+                                }
+                            }
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return chapters
+    }
+
+    private fun saveBooks(context: Context, books: List<BookItem>) {
+        val prefs = context.getSharedPreferences("docuverse_library", Context.MODE_PRIVATE)
+        val arr = JSONArray()
+        for (b in books) {
+            val obj = JSONObject()
+            obj.put("uri", b.uriString)
+            obj.put("title", b.title)
+            obj.put("format", b.format)
+            obj.put("pageCount", b.pageCount)
+            obj.put("lastPage", b.lastPage)
+            arr.put(obj)
+        }
+        prefs.edit().putString("books_json", arr.toString()).apply()
+    }
+
+    private fun loadBooks(context: Context): List<BookItem> {
+        val prefs = context.getSharedPreferences("docuverse_library", Context.MODE_PRIVATE)
+        val raw = prefs.getString("books_json", null) ?: return listOf()
+        return try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<BookItem>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    BookItem(
+                        uriString = obj.getString("uri"),
+                        title = obj.getString("title"),
+                        format = obj.optString("format", "PDF"),
+                        pageCount = obj.getInt("pageCount"),
+                        lastPage = obj.optInt("lastPage", 0),
+                        cover = null
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            listOf()
+        }
+    }
+
+    private fun getRawFileName(context: Context, uri: Uri): String {
+        var name = "Untitled Book"
+        try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (cursor.moveToFirst() && nameIndex >= 0) {
+                    name = cursor.getString(nameIndex) ?: name
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return name
+    }
+
+    private fun getPdfPageCount(context: Context, uri: Uri): Int {
+        return try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                PdfRenderer(pfd).use { it.pageCount }
+            } ?: 0
+        } catch (_: Exception) {
+            0
+        }
+    }
+
+    private fun renderSinglePage(context: Context, uri: Uri, pageIndex: Int, scale: Float): Bitmap? {
+        return try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                PdfRenderer(pfd).use { renderer ->
+                    if (pageIndex < 0 || pageIndex >= renderer.pageCount) return null
+                    renderer.openPage(pageIndex).use { page ->
+                        val w = (page.width * scale).toInt().coerceAtLeast(1)
+                        val h = (page.height * scale).toInt().coerceAtLeast(1)
+                        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                        bmp.eraseColor(Color.WHITE)
+                        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        bmp
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun renderAllPages(context: Context, uri: Uri): List<Bitmap> {
+        val result = mutableListOf<Bitmap>()
+        var pfd: ParcelFileDescriptor? = null
+        var renderer: PdfRenderer? = null
+        try {
+            pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return listOf()
+            renderer = PdfRenderer(pfd)
+            for (i in 0 until renderer.pageCount) {
+                renderer.openPage(i).use { page ->
+                    val scale = 1.5f
+                    val width = (page.width * scale).toInt().coerceAtLeast(1)
+                    val height = (page.height * scale).toInt().coerceAtLeast(1)
+                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    result.add(bitmap)
+                }
+            }
+        } catch (_: Exception) {
+            return listOf()
+        } finally {
+            try {
+                renderer?.close()
+            } catch (_: Exception) {
+            }
+            try {
+                pfd?.close()
+            } catch (_: Exception) {
+            }
+        }
+        return result
+    }
+}
