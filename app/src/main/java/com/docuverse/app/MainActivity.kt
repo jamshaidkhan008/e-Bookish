@@ -37,8 +37,8 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -98,7 +98,6 @@ class MainActivity : ComponentActivity() {
                     var readerPages by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
                     var isLoadingReader by remember { mutableStateOf(false) }
 
-                    // Load cover thumbnails for saved books
                     LaunchedEffect(books) {
                         val missing = books.filter { !covers.containsKey(it.uriString) }
                         if (missing.isNotEmpty()) {
@@ -183,7 +182,7 @@ class MainActivity : ComponentActivity() {
                                     readerPages = emptyList()
                                 }) {
                                     Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        imageVector = Icons.Filled.ArrowBack,
                                         contentDescription = "Back to Shelf"
                                     )
                                 }
@@ -302,7 +301,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     } else {
-                        // Moon+ Reader style Bookshelf Screen
                         val filteredBooks = books.filter {
                             it.title.contains(searchQuery, ignoreCase = true)
                         }
@@ -333,7 +331,7 @@ class MainActivity : ComponentActivity() {
                                     addBookLauncher.launch(arrayOf("application/pdf"))
                                 }) {
                                     Icon(
-                                        imageVector = Icons.Default.Add,
+                                        imageVector = Icons.Filled.Add,
                                         contentDescription = "Add Book"
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
@@ -349,7 +347,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxWidth(),
                                 placeholder = { Text("Search your bookshelf...") },
                                 leadingIcon = {
-                                    Icon(Icons.Default.Search, contentDescription = "Search")
+                                    Icon(Icons.Filled.Search, contentDescription = "Search")
                                 },
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)
@@ -430,7 +428,7 @@ class MainActivity : ComponentActivity() {
                                                 Spacer(modifier = Modifier.height(6.dp))
 
                                                 LinearProgressIndicator(
-                                                    progress = { progress.coerceIn(0f, 1f) },
+                                                    progress = progress.coerceIn(0f, 1f),
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .height(4.dp)
@@ -456,7 +454,7 @@ class MainActivity : ComponentActivity() {
                                                         modifier = Modifier.size(28.dp)
                                                     ) {
                                                         Icon(
-                                                            imageVector = Icons.Default.Delete,
+                                                            imageVector = Icons.Filled.Delete,
                                                             contentDescription = "Remove",
                                                             modifier = Modifier.size(16.dp)
                                                         )
