@@ -13,22 +13,25 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +39,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,6 +48,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val context = LocalContext.current
+                    val scope = rememberCoroutineScope()
                     var pages by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
                     var statusMessage by remember { mutableStateOf("No PDF selected yet") }
 
@@ -58,7 +63,7 @@ class MainActivity : ComponentActivity() {
                                 runOnUiThread {
                                     pages = rendered
                                     statusMessage = if (rendered.isNotEmpty()) {
-                                        "Showing ${rendered.size} page(s)"
+                                        ""
                                     } else {
                                         "Could not read PDF pages"
                                     }
@@ -73,34 +78,100 @@ class MainActivity : ComponentActivity() {
                             .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = "DocuVerse",
-                            style = MaterialTheme.typography.headlineMedium
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(onClick = {
-                            pdfPickerLauncher.launch(arrayOf("application/pdf"))
-                        }) {
-                            Text("Select PDF File")
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = statusMessage,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 24.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            items(pages) { pageBitmap ->
-                                Image(
-                                    bitmap = pageBitmap.asImageBitmap(),
-                                    contentDescription = "PDF Page",
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentScale = ContentScale.FillWidth
+                            Text(
+                                text = "DocuVerse",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                            Button(onClick = {
+                                pdfPickerLauncher.launch(arrayOf("application/pdf"))
+                            }) {
+                                Text("Select PDF")
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (pages.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = statusMessage,
+                                    style = MaterialTheme.typography.bodyLarge
                                 )
+                            }
+                        } else {
+                            val pagerState = rememberPagerState(pageCount = { pages.size })
+
+                            Text(
+                                text = "Page ${pagerState.currentPage + 1} of ${pages.size}",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            HorizontalPager(
+                                state = pagerState,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                            ) { pageIndex ->
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Image(
+                                        bitmap = pages[pageIndex].asImageBitmap(),
+                                        contentDescription = "PDF Page ${pageIndex + 1}",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        if (pagerState.currentPage > 0) {
+                                            scope.launch {
+                                                pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                            }
+                                        }
+                                    },
+                                    enabled = pagerState.currentPage > 0
+                                ) {
+                                    Text("Previous")
+                                }
+
+                                Text(
+                                    text = "${pagerState.currentPage + 1} / ${pages.size}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+
+                                OutlinedButton(
+                                    onClick = {
+                                        if (pagerState.currentPage < pages.size - 1) {
+                                            scope.launch {
+                                                pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                            }
+                                        }
+                                    },
+                                    enabled = pagerState.currentPage < pages.size - 1
+                                ) {
+                                    Text("Next")
+                                }
                             }
                         }
                     }
