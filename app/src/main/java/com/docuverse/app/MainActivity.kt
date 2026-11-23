@@ -28,25 +28,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -76,7 +67,8 @@ data class BookItem(
     val uriString: String,
     val title: String,
     val pageCount: Int,
-    val lastPage: Int = 0
+    val lastPage: Int = 0,
+    val cover: Bitmap? = null
 )
 
 class MainActivity : ComponentActivity() {
@@ -92,25 +84,25 @@ class MainActivity : ComponentActivity() {
                     val scope = rememberCoroutineScope()
 
                     var books by remember { mutableStateOf(loadBooks(context)) }
-                    var covers by remember { mutableStateOf>(emptyMap()) }
                     var searchQuery by remember { mutableStateOf("") }
                     var activeBook by remember { mutableStateOf<BookItem?>(null) }
-                    var readerPages by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+                    var readerPages by remember { mutableStateOf(listOf<Bitmap>()) }
                     var isLoadingReader by remember { mutableStateOf(false) }
 
-                    LaunchedEffect(books) {
-                        val missing = books.filter { !covers.containsKey(it.uriString) }
-                        if (missing.isNotEmpty()) {
+                    LaunchedEffect(books.size) {
+                        val needsCover = books.filter { it.cover == null }
+                        if (needsCover.isNotEmpty()) {
                             Thread {
-                                val newMap = covers.toMutableMap()
-                                for (book in missing) {
-                                    val thumb = renderSinglePage(context, Uri.parse(book.uriString), 0, 0.7f)
-                                    if (thumb != null) {
-                                        newMap[book.uriString] = thumb
+                                val updatedList = books.map { b ->
+                                    if (b.cover == null) {
+                                        val thumb = renderSinglePage(context, Uri.parse(b.uriString), 0, 0.7f)
+                                        b.copy(cover = thumb)
+                                    } else {
+                                        b
                                     }
                                 }
                                 runOnUiThread {
-                                    covers = newMap
+                                    books = updatedList
                                 }
                             }.start()
                         }
@@ -131,12 +123,14 @@ class MainActivity : ComponentActivity() {
                             Thread {
                                 val title = getFileName(context, uri)
                                 val count = getPdfPageCount(context, uri)
+                                val thumb = renderSinglePage(context, uri, 0, 0.7f)
                                 if (count > 0) {
                                     val newBook = BookItem(
                                         uriString = uri.toString(),
                                         title = title,
                                         pageCount = count,
-                                        lastPage = 0
+                                        lastPage = 0,
+                                        cover = thumb
                                     )
                                     runOnUiThread {
                                         val updated = listOf(newBook) + books.filter { it.uriString != newBook.uriString }
@@ -151,7 +145,7 @@ class MainActivity : ComponentActivity() {
                     fun openBook(book: BookItem) {
                         activeBook = book
                         isLoadingReader = true
-                        readerPages = emptyList()
+                        readerPages = listOf()
                         Thread {
                             val rendered = renderAllPages(context, Uri.parse(book.uriString))
                             runOnUiThread {
@@ -162,10 +156,10 @@ class MainActivity : ComponentActivity() {
                     }
 
                     if (activeBook != null) {
-                        val currentBook = activeBook!!
+                        val currentBook = activeBook as BookItem
                         BackHandler {
                             activeBook = null
-                            readerPages = emptyList()
+                            readerPages = listOf()
                         }
 
                         Column(
@@ -175,16 +169,14 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                IconButton(onClick = {
+                                OutlinedButton(onClick = {
                                     activeBook = null
-                                    readerPages = emptyList()
+                                    readerPages = listOf()
                                 }) {
-                                    Icon(
-                                        imageVector = Icons.Filled.ArrowBack,
-                                        contentDescription = "Back to Shelf"
-                                    )
+                                    Text("<- Shelf")
                                 }
                                 Text(
                                     text = currentBook.title,
@@ -246,12 +238,13 @@ class MainActivity : ComponentActivity() {
                                         .weight(1f)
                                         .fillMaxWidth()
                                 ) { pageIndex ->
+                                    val pageBmp: Bitmap = readerPages[pageIndex]
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Image(
-                                            bitmap = readerPages[pageIndex].asImageBitmap(),
+                                            bitmap = pageBmp.asImageBitmap(),
                                             contentDescription = "Page ${pageIndex + 1}",
                                             modifier = Modifier.fillMaxSize(),
                                             contentScale = ContentScale.Fit
@@ -330,12 +323,7 @@ class MainActivity : ComponentActivity() {
                                 Button(onClick = {
                                     addBookLauncher.launch(arrayOf("application/pdf"))
                                 }) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Add,
-                                        contentDescription = "Add Book"
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Add Book")
+                                    Text("+ Add Book")
                                 }
                             }
 
@@ -346,9 +334,6 @@ class MainActivity : ComponentActivity() {
                                 onValueChange = { searchQuery = it },
                                 modifier = Modifier.fillMaxWidth(),
                                 placeholder = { Text("Search your bookshelf...") },
-                                leadingIcon = {
-                                    Icon(Icons.Filled.Search, contentDescription = "Search")
-                                },
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)
                             )
@@ -399,10 +384,10 @@ class MainActivity : ComponentActivity() {
                                                         .background(MaterialTheme.colorScheme.surfaceVariant),
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    val coverBitmap = covers[book.uriString]
-                                                    if (coverBitmap != null) {
+                                                    val coverBmp = book.cover
+                                                    if (coverBmp != null) {
                                                         Image(
-                                                            bitmap = coverBitmap.asImageBitmap(),
+                                                            bitmap = coverBmp.asImageBitmap(),
                                                             contentDescription = book.title,
                                                             modifier = Modifier.fillMaxSize(),
                                                             contentScale = ContentScale.Crop
@@ -445,20 +430,16 @@ class MainActivity : ComponentActivity() {
                                                         style = MaterialTheme.typography.labelSmall,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
-                                                    IconButton(
-                                                        onClick = {
+                                                    Text(
+                                                        text = "Remove",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.clickable {
                                                             val updated = books.filter { it.uriString != book.uriString }
                                                             books = updated
                                                             saveBooks(context, updated)
-                                                        },
-                                                        modifier = Modifier.size(28.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Filled.Delete,
-                                                            contentDescription = "Remove",
-                                                            modifier = Modifier.size(16.dp)
-                                                        )
-                                                    }
+                                                        }
+                                                    )
                                                 }
                                             }
                                         }
@@ -488,7 +469,7 @@ class MainActivity : ComponentActivity() {
 
     private fun loadBooks(context: Context): List<BookItem> {
         val prefs = context.getSharedPreferences("docuverse_library", Context.MODE_PRIVATE)
-        val raw = prefs.getString("books_json", null) ?: return emptyList()
+        val raw = prefs.getString("books_json", null) ?: return listOf()
         return try {
             val arr = JSONArray(raw)
             val list = mutableListOf<BookItem>()
@@ -499,13 +480,14 @@ class MainActivity : ComponentActivity() {
                         uriString = obj.getString("uri"),
                         title = obj.getString("title"),
                         pageCount = obj.getInt("pageCount"),
-                        lastPage = obj.optInt("lastPage", 0)
+                        lastPage = obj.optInt("lastPage", 0),
+                        cover = null
                     )
                 )
             }
             list
         } catch (_: Exception) {
-            emptyList()
+            listOf()
         }
     }
 
@@ -558,7 +540,7 @@ class MainActivity : ComponentActivity() {
         var pfd: ParcelFileDescriptor? = null
         var renderer: PdfRenderer? = null
         try {
-            pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return emptyList()
+            pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return listOf()
             renderer = PdfRenderer(pfd)
             for (i in 0 until renderer.pageCount) {
                 renderer.openPage(i).use { page ->
@@ -572,7 +554,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         } catch (_: Exception) {
-            return emptyList()
+            return listOf()
         } finally {
             try {
                 renderer?.close()
