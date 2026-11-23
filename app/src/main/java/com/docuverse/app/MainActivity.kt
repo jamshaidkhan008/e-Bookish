@@ -275,19 +275,19 @@ class MainActivity : ComponentActivity() {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(12.dp)
+                                .padding(horizontal = 14.dp, vertical = 20.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 OutlinedButton(onClick = {
                                     activeBook = null
                                     readerPages = listOf()
                                     epubChapters = listOf()
                                 }) {
-                                    Text("<- Shelf")
+                                    Text("Shelf", maxLines = 1, softWrap = false)
                                 }
                                 Text(
                                     text = currentBook.title,
@@ -298,37 +298,36 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            Spacer(modifier = Modifier.height(6.dp))
+
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 OutlinedButton(
                                     onClick = {
                                         val next = zoomScale - 0.25f
                                         zoomScale = if (next < 0.75f) 0.75f else next
-                                    }
+                                    },
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("Zoom -")
+                                    Text("Zoom -", maxLines = 1, softWrap = false)
                                 }
-                                Text(
-                                    text = "${(zoomScale * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelLarge
-                                )
                                 OutlinedButton(
                                     onClick = {
                                         val next = zoomScale + 0.25f
                                         zoomScale = if (next > 2.5f) 2.5f else next
-                                    }
+                                    },
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("Zoom +")
+                                    Text("Zoom +", maxLines = 1, softWrap = false)
                                 }
                                 OutlinedButton(
-                                    onClick = { zoomScale = 1f }
+                                    onClick = { zoomScale = 1f },
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("Reset")
+                                    Text("${(zoomScale * 100).toInt()}%", maxLines = 1, softWrap = false)
                                 }
                             }
 
@@ -422,7 +421,7 @@ class MainActivity : ComponentActivity() {
                                             },
                                             enabled = pagerState.currentPage > 0
                                         ) {
-                                            Text("Previous")
+                                            Text("Previous", maxLines = 1, softWrap = false)
                                         }
 
                                         Text(
@@ -441,7 +440,7 @@ class MainActivity : ComponentActivity() {
                                             },
                                             enabled = pagerState.currentPage < epubChapters.size - 1
                                         ) {
-                                            Text("Next")
+                                            Text("Next", maxLines = 1, softWrap = false)
                                         }
                                     }
                                 }
@@ -532,7 +531,7 @@ class MainActivity : ComponentActivity() {
                                         },
                                         enabled = pagerState.currentPage > 0
                                     ) {
-                                        Text("Previous")
+                                        Text("Previous", maxLines = 1, softWrap = false)
                                     }
 
                                     Text(
@@ -551,7 +550,7 @@ class MainActivity : ComponentActivity() {
                                         },
                                         enabled = pagerState.currentPage < readerPages.size - 1
                                     ) {
-                                        Text("Next")
+                                        Text("Next", maxLines = 1, softWrap = false)
                                     }
                                 }
                             }
@@ -564,18 +563,20 @@ class MainActivity : ComponentActivity() {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(16.dp)
+                                .padding(horizontal = 16.dp, vertical = 22.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "DocuVerse Shelf",
                                         style = MaterialTheme.typography.headlineSmall,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "${books.size} book(s) in library",
@@ -583,42 +584,75 @@ class MainActivity : ComponentActivity() {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Button(onClick = {
                                     addBookLauncher.launch(
                                         arrayOf("application/pdf", "application/epub+zip", "*/*")
                                     )
                                 }) {
-                                    Text("+ Add Book")
+                                    Text("+ Add Book", maxLines = 1, softWrap = false)
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
 
+                            // Row 1: Scanner action
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 OutlinedButton(
                                     onClick = { scanDevicePdfs() },
-                                    enabled = !isScanning
+                                    enabled = !isScanning,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(if (isScanning) "Scanning..." else "Scan PDFs")
+                                    Text(
+                                        text = if (isScanning) "Scanning Device PDFs..." else "Scan Device for PDFs",
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Row 2: 3 equal-width library view mode buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val b2 = if (viewMode == LibraryViewMode.GRID_2) Button else OutlinedButton
+                                OutlinedButton(
+                                    onClick = { viewMode = LibraryViewMode.GRID_2 },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = if (viewMode == LibraryViewMode.GRID_2) "2-Grid ✓" else "2-Grid",
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                                 OutlinedButton(
-                                    onClick = { viewMode = LibraryViewMode.GRID_2 }
+                                    onClick = { viewMode = LibraryViewMode.GRID_3 },
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Text(if (viewMode == LibraryViewMode.GRID_2) "[2-Grid]" else "2-Grid")
+                                    Text(
+                                        text = if (viewMode == LibraryViewMode.GRID_3) "3-Grid ✓" else "3-Grid",
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                                 OutlinedButton(
-                                    onClick = { viewMode = LibraryViewMode.GRID_3 }
+                                    onClick = { viewMode = LibraryViewMode.LIST },
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Text(if (viewMode == LibraryViewMode.GRID_3) "[3-Grid]" else "3-Grid")
-                                }
-                                OutlinedButton(
-                                    onClick = { viewMode = LibraryViewMode.LIST }
-                                ) {
-                                    Text(if (viewMode == LibraryViewMode.LIST) "[List]" else "List")
+                                    Text(
+                                        text = if (viewMode == LibraryViewMode.LIST) "List ✓" else "List",
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
 
@@ -637,7 +671,7 @@ class MainActivity : ComponentActivity() {
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("Search PDFs and EPUBs...") },
+                                placeholder = { Text("Search PDFs and EPUBs...", maxLines = 1) },
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)
                             )
@@ -650,7 +684,7 @@ class MainActivity : ComponentActivity() {
                                     contentAlignment = Alignment.Center
                                 ) {
                                     val emptyText = if (books.isEmpty()) {
-                                        "Your shelf is empty.\nTap 'Scan PDFs' or '+ Add Book' to import PDFs and EPUBs."
+                                        "Your shelf is empty.\nTap 'Scan Device for PDFs' or '+ Add Book' to import books."
                                     } else {
                                         "No matching books found."
                                     }
@@ -717,6 +751,8 @@ class MainActivity : ComponentActivity() {
                                                     text = "Remove",
                                                     style = MaterialTheme.typography.labelMedium,
                                                     color = MaterialTheme.colorScheme.error,
+                                                    maxLines = 1,
+                                                    softWrap = false,
                                                     modifier = Modifier.clickable {
                                                         val updated = books.filter { it.uriString != book.uriString }
                                                         books = updated
@@ -772,7 +808,8 @@ class MainActivity : ComponentActivity() {
                                                     } else {
                                                         Text(
                                                             text = book.format,
-                                                            style = MaterialTheme.typography.titleMedium
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.Bold
                                                         )
                                                     }
                                                 }
@@ -805,12 +842,16 @@ class MainActivity : ComponentActivity() {
                                                     Text(
                                                         text = "$percent% • ${book.pageCount}",
                                                         style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        softWrap = false
                                                     )
                                                     Text(
                                                         text = "Del",
                                                         style = MaterialTheme.typography.labelSmall,
                                                         color = MaterialTheme.colorScheme.error,
+                                                        maxLines = 1,
+                                                        softWrap = false,
                                                         modifier = Modifier.clickable {
                                                             val updated = books.filter { it.uriString != book.uriString }
                                                             books = updated
