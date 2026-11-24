@@ -1,4 +1,4 @@
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_eBookish_book" />
-    <foreground android:drawable="@drawable/ic_eBookish_book" />
+    <background android:drawable="@drawable/ic_docuverse_book" />
+    <foreground android:drawable="@drawable/ic_docuverse_book" />
 </adaptive-icon>
