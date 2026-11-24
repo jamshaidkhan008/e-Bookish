@@ -596,7 +596,6 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            // Row 1: Scanner action
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -617,13 +616,11 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(6.dp))
 
-                            // Row 2: 3 equal-width library view mode buttons
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val b2 = if (viewMode == LibraryViewMode.GRID_2) Button else OutlinedButton
                                 OutlinedButton(
                                     onClick = { viewMode = LibraryViewMode.GRID_2 },
                                     modifier = Modifier.weight(1f)
