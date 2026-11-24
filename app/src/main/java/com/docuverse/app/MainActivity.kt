@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -116,6 +117,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipInputStream
 import kotlin.random.Random
+
+private val ReadEraBarColor = ComposeColor(0xFF146C8E)
+private val ReadEraBarText = ComposeColor(0xFFFFFFFF)
 
 enum class LibraryViewMode {
     GRID_3, GRID_2, LIST
@@ -1329,7 +1333,7 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier
                                                 .align(Alignment.TopCenter)
                                                 .fillMaxWidth()
-                                                .background(epubPageTheme.chromeBg)
+                                                .background(ReadEraBarColor)
                                         ) {
                                             Row(
                                                 modifier = Modifier
@@ -1343,11 +1347,13 @@ class MainActivity : ComponentActivity() {
                                                         activeBook = null
                                                         epubChapters = listOf()
                                                     },
+                                                    border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                 ) {
                                                     Text(
                                                         text = "← Shelf",
-                                                        color = epubPageTheme.textColor,
+                                                        color = ReadEraBarText,
+                                                        fontWeight = FontWeight.SemiBold,
                                                         maxLines = 1,
                                                         softWrap = false
                                                     )
@@ -1357,25 +1363,26 @@ class MainActivity : ComponentActivity() {
                                                     Text(
                                                         text = currentBook.title,
                                                         style = MaterialTheme.typography.titleMedium,
-                                                        color = epubPageTheme.textColor,
+                                                        color = ReadEraBarText,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                     Text(
                                                         text = "Section ${pagerState.currentPage + 1} of ${epubChapters.size}",
                                                         style = MaterialTheme.typography.labelSmall,
-                                                        color = epubPageTheme.textColor.copy(alpha = 0.78f),
+                                                        color = ReadEraBarText.copy(alpha = 0.88f),
                                                         maxLines = 1
                                                     )
                                                 }
 
                                                 OutlinedButton(
                                                     onClick = { showAaPanel = !showAaPanel },
+                                                    border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                 ) {
                                                     Text(
                                                         text = "Aa",
-                                                        color = epubPageTheme.textColor,
+                                                        color = ReadEraBarText,
                                                         fontWeight = FontWeight.Bold,
                                                         maxLines = 1,
                                                         softWrap = false
@@ -1387,14 +1394,14 @@ class MainActivity : ComponentActivity() {
                                                 Column(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .background(epubPageTheme.chromeBg)
+                                                        .background(ReadEraBarColor.copy(alpha = 0.96f))
                                                         .padding(horizontal = 14.dp, vertical = 8.dp),
                                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                                 ) {
                                                     Text(
                                                         text = "Page Background: ${epubPageTheme.label}",
                                                         style = MaterialTheme.typography.labelLarge,
-                                                        color = epubPageTheme.textColor
+                                                        color = ReadEraBarText
                                                     )
                                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                                         items(EpubPageTheme.entries) { themeOpt ->
@@ -1410,7 +1417,7 @@ class MainActivity : ComponentActivity() {
                                                                         .background(themeOpt.bgColor)
                                                                         .border(
                                                                             width = if (isCurr) 3.dp else 1.dp,
-                                                                            color = if (isCurr) MaterialTheme.colorScheme.primary else epubPageTheme.textColor.copy(alpha = 0.4f),
+                                                                            color = if (isCurr) ReadEraBarText else ReadEraBarText.copy(alpha = 0.5f),
                                                                             shape = CircleShape
                                                                         )
                                                                 )
@@ -1418,7 +1425,7 @@ class MainActivity : ComponentActivity() {
                                                                 Text(
                                                                     text = themeOpt.label,
                                                                     style = MaterialTheme.typography.labelSmall,
-                                                                    color = epubPageTheme.textColor,
+                                                                    color = ReadEraBarText,
                                                                     maxLines = 1
                                                                 )
                                                             }
@@ -1433,20 +1440,22 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "Font Size: ${epubFontSizeSp.toInt()}sp",
                                                             style = MaterialTheme.typography.labelLarge,
-                                                            color = epubPageTheme.textColor
+                                                            color = ReadEraBarText
                                                         )
                                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                             OutlinedButton(
                                                                 onClick = { epubFontSizeSp = (epubFontSizeSp - 2f).coerceAtLeast(14f) },
+                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("A-", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                                Text("A-", color = ReadEraBarText, maxLines = 1, softWrap = false)
                                                             }
                                                             OutlinedButton(
                                                                 onClick = { epubFontSizeSp = (epubFontSizeSp + 2f).coerceAtMost(28f) },
+                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("A+", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                                Text("A+", color = ReadEraBarText, maxLines = 1, softWrap = false)
                                                             }
                                                         }
                                                     }
@@ -1458,12 +1467,13 @@ class MainActivity : ComponentActivity() {
                                                         for (fOpt in EpubFontStyleOption.entries) {
                                                             OutlinedButton(
                                                                 onClick = { epubFontStyle = fOpt },
+                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                                 modifier = Modifier.weight(1f),
                                                                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
                                                             ) {
                                                                 Text(
                                                                     text = if (epubFontStyle == fOpt) "${fOpt.label} ✓" else fOpt.label,
-                                                                    color = epubPageTheme.textColor,
+                                                                    color = ReadEraBarText,
                                                                     fontFamily = fOpt.family,
                                                                     maxLines = 1,
                                                                     softWrap = false
@@ -1480,20 +1490,22 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "Line Spacing: ${String.format(Locale.US, "%.2f", epubLineSpacingMult)}x",
                                                             style = MaterialTheme.typography.labelLarge,
-                                                            color = epubPageTheme.textColor
+                                                            color = ReadEraBarText
                                                         )
                                                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                             OutlinedButton(
                                                                 onClick = { epubLineSpacingMult = (epubLineSpacingMult - 0.15f).coerceAtLeast(1.1f) },
+                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("Tighter", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                                Text("Tighter", color = ReadEraBarText, maxLines = 1, softWrap = false)
                                                             }
                                                             OutlinedButton(
                                                                 onClick = { epubLineSpacingMult = (epubLineSpacingMult + 0.15f).coerceAtMost(2.0f) },
+                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("Wider", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                                Text("Wider", color = ReadEraBarText, maxLines = 1, softWrap = false)
                                                             }
                                                         }
                                                     }
@@ -1506,20 +1518,22 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "Side Margins: ${epubSideMarginDp}dp",
                                                             style = MaterialTheme.typography.labelLarge,
-                                                            color = epubPageTheme.textColor
+                                                            color = ReadEraBarText
                                                         )
                                                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                             OutlinedButton(
                                                                 onClick = { epubSideMarginDp = (epubSideMarginDp - 6).coerceAtLeast(12) },
+                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("Narrow", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                                Text("Narrow", color = ReadEraBarText, maxLines = 1, softWrap = false)
                                                             }
                                                             OutlinedButton(
                                                                 onClick = { epubSideMarginDp = (epubSideMarginDp + 6).coerceAtMost(48) },
+                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("Wide", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                                Text("Wide", color = ReadEraBarText, maxLines = 1, softWrap = false)
                                                             }
                                                         }
                                                     }
@@ -1537,15 +1551,16 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "Paragraph Indent: $indentLabel",
                                                             style = MaterialTheme.typography.labelLarge,
-                                                            color = epubPageTheme.textColor
+                                                            color = ReadEraBarText
                                                         )
                                                         OutlinedButton(
                                                             onClick = {
                                                                 epubParagraphIndentLevel = (epubParagraphIndentLevel + 1) % 3
                                                             },
+                                                            border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                                                         ) {
-                                                            Text("Cycle Indent", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                            Text("Cycle Indent", color = ReadEraBarText, maxLines = 1, softWrap = false)
                                                         }
                                                     }
                                                 }
@@ -1558,11 +1573,14 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
-                                                .background(epubPageTheme.chromeBg)
+                                                .background(ReadEraBarColor)
+                                                .navigationBarsPadding()
                                                 .padding(horizontal = 14.dp, vertical = 10.dp)
                                         ) {
                                             LinearProgressIndicator(
                                                 progress = progFrac,
+                                                color = ReadEraBarText,
+                                                trackColor = ReadEraBarText.copy(alpha = 0.3f),
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .height(4.dp)
@@ -1583,16 +1601,17 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     },
                                                     enabled = pagerState.currentPage > 0,
+                                                    border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                 ) {
-                                                    Text("Prev Sec", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                    Text("Prev Sec", color = ReadEraBarText, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                                                 }
 
                                                 Text(
                                                     text = "${pagerState.currentPage + 1} of ${epubChapters.size} ($pct%)",
-                                                    style = MaterialTheme.typography.labelMedium,
+                                                    style = MaterialTheme.typography.labelLarge,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = epubPageTheme.textColor
+                                                    color = ReadEraBarText
                                                 )
 
                                                 OutlinedButton(
@@ -1604,9 +1623,10 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     },
                                                     enabled = pagerState.currentPage < epubChapters.size - 1,
+                                                    border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                 ) {
-                                                    Text("Next Sec", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                    Text("Next Sec", color = ReadEraBarText, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                                                 }
                                             }
                                         }
@@ -1614,7 +1634,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         } else {
-                            // PDF Reader with pinch-to-zoom and ReadEra-style bottom page counter
+                            // PDF Reader with pinch-to-zoom and ReadEra-style toggleable bright bar above nav buttons
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1719,7 +1739,7 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier
                                                 .align(Alignment.TopCenter)
                                                 .fillMaxWidth()
-                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+                                                .background(ReadEraBarColor)
                                                 .padding(horizontal = 12.dp, vertical = 12.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1729,42 +1749,60 @@ class MainActivity : ComponentActivity() {
                                                     activeBook = null
                                                     readerPages = listOf()
                                                 },
+                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                             ) {
-                                                Text("← Shelf", maxLines = 1, softWrap = false)
+                                                Text("← Shelf", color = ReadEraBarText, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                                             }
                                             Text(
                                                 text = currentBook.title,
                                                 style = MaterialTheme.typography.titleMedium,
+                                                color = ReadEraBarText,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
                                                 modifier = Modifier.weight(1f)
                                             )
                                         }
-                                    }
 
-                                    val pagePct = ((pagerState.currentPage + 1) * 100) / readerPages.size
-                                    Row(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .fillMaxWidth()
-                                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-                                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "${pagerState.currentPage + 1} of ${readerPages.size}",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = "$pagePct%",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
+                                        val pagePct = ((pagerState.currentPage + 1) * 100) / readerPages.size
+                                        val pageFrac = ((pagerState.currentPage + 1).toFloat() / readerPages.size.toFloat()).coerceIn(0f, 1f)
+                                        Column(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .fillMaxWidth()
+                                                .background(ReadEraBarColor)
+                                                .navigationBarsPadding()
+                                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                                        ) {
+                                            LinearProgressIndicator(
+                                                progress = pageFrac,
+                                                color = ReadEraBarText,
+                                                trackColor = ReadEraBarText.copy(alpha = 0.3f),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(4.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "${pagerState.currentPage + 1} of ${readerPages.size}",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = ReadEraBarText
+                                                )
+                                                Text(
+                                                    text = "$pagePct%",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = ReadEraBarText
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
