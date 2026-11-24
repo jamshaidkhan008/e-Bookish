@@ -1,11 +1,14 @@
 package com.docuverse.app
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
@@ -67,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -128,7 +132,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    fun importBookUri(uri: Uri) {
+                    fun importBookUri(uri: Uri): Boolean {
                         try {
                             contentResolver.takePersistableUriPermission(
                                 uri,
@@ -160,6 +164,7 @@ class MainActivity : ComponentActivity() {
                                 books = updated
                                 saveBooks(context, updated)
                             }
+                            return true
                         } else {
                             val count = getPdfPageCount(context, uri)
                             val thumb = renderSinglePage(context, uri, 0, 0.7f)
@@ -177,8 +182,10 @@ class MainActivity : ComponentActivity() {
                                     books = updated
                                     saveBooks(context, updated)
                                 }
+                                return true
                             }
                         }
+                        return false
                     }
 
                     val addBookLauncher = rememberLauncherForActivityResult(
@@ -186,17 +193,18 @@ class MainActivity : ComponentActivity() {
                     ) { uris: List<Uri> ->
                         if (uris.isNotEmpty()) {
                             Thread {
+                                var imported = 0
                                 for (u in uris) {
-                                    importBookUri(u)
+                                    if (importBookUri(u)) imported++
                                 }
                                 runOnUiThread {
-                                    scanNotice = "Imported ${uris.size} file(s) into library."
+                                    scanNotice = "Imported $imported of ${uris.size} selected file(s)."
                                 }
                             }.start()
                         }
                     }
 
-                    fun scanDevicePdfs() {
+                    fun runPdfScanNow() {
                         isScanning = true
                         scanNotice = "Scanning device for PDFs..."
                         Thread {
@@ -232,12 +240,40 @@ class MainActivity : ComponentActivity() {
                                 saveBooks(context, currentList)
                                 isScanning = false
                                 scanNotice = if (addedCount > 0) {
-                                    "Added $addedCount new PDF(s). Tap '+ Add Book' for any folder."
+                                    "Added $addedCount new PDF(s). Tap '+ Add Book' to pick more."
+                                } else if (foundUris.isEmpty()) {
+                                    "0 PDFs indexed by MediaStore. Tap '+ Add Book' to select PDFs directly."
                                 } else {
-                                    "Scan done (${foundUris.size} found). Tap '+ Add Book' for PDFs/EPUBs."
+                                    "All ${foundUris.size} scanned PDF(s) already in library."
                                 }
                             }
                         }.start()
+                    }
+
+                    val permissionLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.RequestMultiplePermissions()
+                    ) { _ ->
+                        runPdfScanNow()
+                    }
+
+                    fun startScanWithPermissionCheck() {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            val docPerm = Manifest.permission.READ_MEDIA_DOCUMENTS
+                            val granted = ContextCompat.checkSelfPermission(context, docPerm) == PackageManager.PERMISSION_GRANTED
+                            if (granted) {
+                                runPdfScanNow()
+                            } else {
+                                runPdfScanNow()
+                            }
+                        } else {
+                            val readPerm = Manifest.permission.READ_EXTERNAL_STORAGE
+                            val granted = ContextCompat.checkSelfPermission(context, readPerm) == PackageManager.PERMISSION_GRANTED
+                            if (granted) {
+                                runPdfScanNow()
+                            } else {
+                                permissionLauncher.launch(arrayOf(readPerm))
+                            }
+                        }
                     }
 
                     fun openBook(book: BookItem) {
@@ -602,7 +638,7 @@ class MainActivity : ComponentActivity() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 OutlinedButton(
-                                    onClick = { scanDevicePdfs() },
+                                    onClick = { startScanWithPermissionCheck() },
                                     enabled = !isScanning,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
