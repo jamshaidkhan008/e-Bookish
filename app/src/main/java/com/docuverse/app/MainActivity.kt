@@ -121,6 +121,48 @@ import kotlin.random.Random
 private val ReadEraBarColor = ComposeColor(0xFF146C8E)
 private val ReadEraBarText = ComposeColor(0xFFFFFFFF)
 
+private val SupportedBookExtensions = listOf(
+    ".pdf", ".epub", ".mobi", ".azw", ".azw3", ".fb2", ".txt", ".docx"
+)
+
+private fun isSupportedBookFile(name: String, mime: String): Boolean {
+    val lower = name.lowercase()
+    val mimeLower = mime.lowercase()
+    return SupportedBookExtensions.any { lower.endsWith(it) } ||
+        mimeLower.contains("pdf") ||
+        mimeLower.contains("epub") ||
+        mimeLower.contains("mobipocket") ||
+        mimeLower.contains("fictionbook") ||
+        mimeLower.startsWith("text/plain") ||
+        mimeLower.contains("wordprocessingml.document")
+}
+
+private fun detectBookFormat(name: String, mime: String): String {
+    val lower = name.lowercase()
+    val mimeLower = mime.lowercase()
+    return when {
+        lower.endsWith(".epub") || mimeLower.contains("epub") -> "EPUB"
+        lower.endsWith(".mobi") || mimeLower.contains("mobipocket") -> "MOBI"
+        lower.endsWith(".azw3") -> "AZW3"
+        lower.endsWith(".azw") -> "AZW"
+        lower.endsWith(".fb2") || mimeLower.contains("fictionbook") -> "FB2"
+        lower.endsWith(".docx") || mimeLower.contains("wordprocessingml.document") -> "DOCX"
+        lower.endsWith(".txt") || mimeLower.startsWith("text/plain") -> "TXT"
+        else -> "PDF"
+    }
+}
+
+private fun stripBookExtension(rawName: String): String {
+    var out = rawName
+    for (ext in SupportedBookExtensions) {
+        if (out.lowercase().endsWith(ext)) {
+            out = out.dropLast(ext.length)
+            break
+        }
+    }
+    return out
+}
+
 enum class LibraryViewMode {
     GRID_3, GRID_2, LIST
 }
@@ -439,7 +481,7 @@ class MainActivity : ComponentActivity() {
                                         metadataLoaded = true
                                     )
                                 } else {
-                                    val chapters = extractEpubChapters(context, Uri.parse(b.uriString))
+                                    val chapters = extractBookSections(context, Uri.parse(b.uriString), b.format)
                                     working[i] = b.copy(
                                         pageCount = if (chapters.isNotEmpty()) chapters.size else b.pageCount.coerceAtLeast(1),
                                         metadataLoaded = true
@@ -466,12 +508,7 @@ class MainActivity : ComponentActivity() {
                                     val b = working[i]
                                     if (!b.metadataLoaded) {
                                         val uri = Uri.parse(b.uriString)
-                                        if (b.format == "EPUB") {
-                                            val chapters = extractEpubChapters(context, uri)
-                                            val count = if (chapters.isNotEmpty()) chapters.size else 1
-                                            working[i] = b.copy(pageCount = count, metadataLoaded = true)
-                                            changed = true
-                                        } else {
+                                        if (b.format == "PDF") {
                                             val count = getPdfPageCount(context, uri)
                                             val thumb = renderSinglePage(context, uri, 0, 0.45f)
                                             working[i] = b.copy(
@@ -479,6 +516,11 @@ class MainActivity : ComponentActivity() {
                                                 cover = thumb,
                                                 metadataLoaded = true
                                             )
+                                            changed = true
+                                        } else {
+                                            val chapters = extractBookSections(context, uri, b.format)
+                                            val count = if (chapters.isNotEmpty()) chapters.size else 1
+                                            working[i] = b.copy(pageCount = count, metadataLoaded = true)
                                             changed = true
                                         }
                                         if (changed && (i + 1) % 3 == 0) {
@@ -506,27 +548,27 @@ class MainActivity : ComponentActivity() {
                         }
 
                         val rawName = knownName ?: getRawFileName(context, uri)
-                        val lower = rawName.lowercase()
                         val mime = context.contentResolver.getType(uri)?.lowercase() ?: ""
-                        val isEpub = lower.endsWith(".epub") || mime.contains("epub")
-                        val isPdf = lower.endsWith(".pdf") || mime.contains("pdf")
+                        if (!isSupportedBookFile(rawName, mime)) return null
 
-                        if (!isEpub && !isPdf) return null
-
-                        val title = rawName
-                            .removeSuffix(".pdf").removeSuffix(".PDF")
-                            .removeSuffix(".epub").removeSuffix(".EPUB")
+                        val fmt = detectBookFormat(rawName, mime)
+                        val title = stripBookExtension(rawName)
+                        val defaultCol = when (fmt) {
+                            "PDF" -> "Documents"
+                            "DOCX", "TXT" -> "Docs & Notes"
+                            else -> "Ebooks"
+                        }
 
                         return BookItem(
                             uriString = uri.toString(),
                             title = title,
-                            format = if (isEpub) "EPUB" else "PDF",
+                            format = fmt,
                             pageCount = 1,
                             lastPage = 0,
                             isFavorite = false,
                             isTrashed = false,
                             author = if (title.contains(" - ")) title.substringBefore(" - ").trim() else "Library",
-                            collection = if (isEpub) "Ebooks" else "Documents",
+                            collection = defaultCol,
                             cover = null,
                             metadataLoaded = false
                         )
@@ -636,16 +678,16 @@ class MainActivity : ComponentActivity() {
                         readerPages = listOf()
                         epubChapters = listOf()
                         Thread {
-                            if (book.format == "EPUB") {
-                                val chapters = extractEpubChapters(context, Uri.parse(book.uriString))
-                                runOnUiThread {
-                                    epubChapters = chapters
-                                    isLoadingReader = false
-                                }
-                            } else {
+                            if (book.format == "PDF") {
                                 val rendered = renderAllPages(context, Uri.parse(book.uriString))
                                 runOnUiThread {
                                     readerPages = rendered
+                                    isLoadingReader = false
+                                }
+                            } else {
+                                val chapters = extractBookSections(context, Uri.parse(book.uriString), book.format)
+                                runOnUiThread {
+                                    epubChapters = chapters
                                     isLoadingReader = false
                                 }
                             }
@@ -1215,7 +1257,7 @@ class MainActivity : ComponentActivity() {
                         var showReaderBars by remember { mutableStateOf(false) }
                         var showAaPanel by remember { mutableStateOf(false) }
 
-                        if (currentBook.format == "EPUB") {
+                        if (currentBook.format != "PDF") {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1229,7 +1271,7 @@ class MainActivity : ComponentActivity() {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             CircularProgressIndicator(color = epubPageTheme.textColor)
                                             Spacer(modifier = Modifier.height(10.dp))
-                                            Text("Opening book...", color = epubPageTheme.textColor)
+                                            Text("Opening ${currentBook.format}...", color = epubPageTheme.textColor)
                                         }
                                     }
                                 } else if (epubChapters.isEmpty()) {
@@ -1237,7 +1279,10 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("Could not read readable text from this EPUB.", color = epubPageTheme.textColor)
+                                        Text(
+                                            text = "Could not extract readable text from this ${currentBook.format} file.",
+                                            color = epubPageTheme.textColor
+                                        )
                                     }
                                 } else {
                                     val maxIdx = epubChapters.size - 1
@@ -1368,7 +1413,7 @@ class MainActivity : ComponentActivity() {
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                     Text(
-                                                        text = "Section ${pagerState.currentPage + 1} of ${epubChapters.size}",
+                                                        text = "${currentBook.format} • Section ${pagerState.currentPage + 1} of ${epubChapters.size}",
                                                         style = MaterialTheme.typography.labelSmall,
                                                         color = ReadEraBarText.copy(alpha = 0.88f),
                                                         maxLines = 1
@@ -1634,7 +1679,6 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         } else {
-                            // PDF Reader with pinch-to-zoom and ReadEra-style toggleable bright bar above nav buttons
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1959,7 +2003,7 @@ class MainActivity : ComponentActivity() {
                                 if (section == ReadEraSection.FORMATS) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        items(listOf("ALL", "PDF", "EPUB")) { fmt ->
+                                        items(listOf("ALL", "PDF", "EPUB", "MOBI", "AZW", "AZW3", "FB2", "TXT", "DOCX")) { fmt ->
                                             OutlinedButton(onClick = { formatFilter = fmt }) {
                                                 Text(if (formatFilter == fmt) "$fmt ✓" else fmt, maxLines = 1, softWrap = false)
                                             }
@@ -1976,7 +2020,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 } else if (section == ReadEraSection.COLLECTIONS) {
-                                    val colList = listOf("ALL", "General", "Documents", "Ebooks", "Scans")
+                                    val colList = listOf("ALL", "General", "Documents", "Docs & Notes", "Ebooks", "Scans")
                                     Spacer(modifier = Modifier.height(8.dp))
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         items(colList) { col ->
@@ -2078,7 +2122,7 @@ class MainActivity : ComponentActivity() {
                                             Text("e-Bookish", fontWeight = FontWeight.Bold)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "Includes Reading Now, Favorites, To Read, Have Read, Authors, Series, Collections, Formats, Folder Scanner, Trash & Restore, and Document Scanner.",
+                                                text = "Supports PDF, EPUB, MOBI, AZW/AZW3, FB2, TXT, DOCX, Folder Scanner, Trash & Restore, and Document Scanner.",
                                                 style = MaterialTheme.typography.bodySmall
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
@@ -2098,7 +2142,7 @@ class MainActivity : ComponentActivity() {
                                             text = if (section == ReadEraSection.TRASH) {
                                                 "Trash is empty."
                                             } else if (activeBooks.isEmpty()) {
-                                                "No books yet.\nTap Menu -> Folders or Downloads to add PDFs and EPUBs."
+                                                "No books yet.\nTap Menu -> Folders or Downloads to add PDF, EPUB, MOBI, AZW, FB2, TXT, or DOCX files."
                                             } else {
                                                 "No books in '${section.label}'."
                                             },
@@ -2656,17 +2700,12 @@ class MainActivity : ComponentActivity() {
                             if (dirLower !in skippedDirs && !dirLower.startsWith(".")) {
                                 queue.add(docId)
                             }
-                        } else {
-                            val lower = name.lowercase()
-                            if (lower.endsWith(".pdf") || lower.endsWith(".epub") ||
-                                mime == "application/pdf" || mime.contains("epub")
-                            ) {
-                                val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-                                found.add(Pair(docUri, name))
-                                if (found.size - lastReported >= 5) {
-                                    lastReported = found.size
-                                    onProgress(found.size)
-                                }
+                        } else if (isSupportedBookFile(name, mime)) {
+                            val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                            found.add(Pair(docUri, name))
+                            if (found.size - lastReported >= 5) {
+                                lastReported = found.size
+                                onProgress(found.size)
                             }
                         }
                     }
@@ -2688,6 +2727,164 @@ class MainActivity : ComponentActivity() {
         return prefs.getString("scan_tree_uri", null)
     }
 
+    private fun chunkTextIntoSections(fullText: String, targetChunkChars: Int = 4500): List<String> {
+        val cleaned = fullText
+            .replace("\r\n", "\n")
+            .replace(Regex("\n{3,}"), "\n\n")
+            .trim()
+        if (cleaned.isEmpty()) return listOf()
+        if (cleaned.length <= targetChunkChars) return listOf(cleaned)
+
+        val chunks = mutableListOf<String>()
+        var idx = 0
+        val len = cleaned.length
+        while (idx < len) {
+            val end = (idx + targetChunkChars).coerceAtMost(len)
+            var splitAt = end
+            if (end < len) {
+                val paraBreak = cleaned.lastIndexOf("\n\n", end)
+                val lineBreak = cleaned.lastIndexOf('\n', end)
+                val spaceBreak = cleaned.lastIndexOf(' ', end)
+                splitAt = when {
+                    paraBreak > idx + (targetChunkChars / 2) -> paraBreak
+                    lineBreak > idx + (targetChunkChars / 2) -> lineBreak
+                    spaceBreak > idx + (targetChunkChars / 2) -> spaceBreak
+                    else -> end
+                }
+            }
+            val piece = cleaned.substring(idx, splitAt).trim()
+            if (piece.isNotEmpty()) chunks.add(piece)
+            idx = if (splitAt > idx) splitAt else end
+        }
+        return chunks
+    }
+
+    @Suppress("DEPRECATION")
+    private fun extractBookSections(context: Context, uri: Uri, format: String): List<String> {
+        return when (format) {
+            "EPUB" -> extractEpubChapters(context, uri)
+            "TXT" -> extractTxtSections(context, uri)
+            "FB2" -> extractFb2Sections(context, uri)
+            "DOCX" -> extractDocxSections(context, uri)
+            "MOBI", "AZW", "AZW3" -> extractMobiAzwSections(context, uri)
+            else -> extractEpubChapters(context, uri)
+        }
+    }
+
+    private fun extractTxtSections(context: Context, uri: Uri): List<String> {
+        return try {
+            val raw = context.contentResolver.openInputStream(uri)?.use { stream ->
+                val bytes = stream.readBytes()
+                val utf8 = String(bytes, Charsets.UTF_8)
+                if (utf8.contains('\uFFFD')) String(bytes, Charsets.ISO_8859_1) else utf8
+            } ?: ""
+            chunkTextIntoSections(raw)
+        } catch (_: Exception) {
+            listOf()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun extractFb2Sections(context: Context, uri: Uri): List<String> {
+        return try {
+            val xml = context.contentResolver.openInputStream(uri)?.use { stream ->
+                val bytes = stream.readBytes()
+                val utf8 = String(bytes, Charsets.UTF_8)
+                if (utf8.contains('\uFFFD')) String(bytes, Charsets.ISO_8859_1) else utf8
+            } ?: ""
+            val withBreaks = xml
+                .replace(Regex("</(p|title|subtitle|section|poem|stanza|v)>", RegexOption.IGNORE_CASE), "\n\n")
+                .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+            val plain = Html.fromHtml(withBreaks).toString()
+            chunkTextIntoSections(plain)
+        } catch (_: Exception) {
+            listOf()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun extractDocxSections(context: Context, uri: Uri): List<String> {
+        return try {
+            var docXml = ""
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                ZipInputStream(inputStream).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory && entry.name.equals("word/document.xml", ignoreCase = true)) {
+                            val buffer = ByteArrayOutputStream()
+                            val tmp = ByteArray(4096)
+                            var read = zip.read(tmp)
+                            while (read != -1) {
+                                buffer.write(tmp, 0, read)
+                                read = zip.read(tmp)
+                            }
+                            docXml = buffer.toString("UTF-8")
+                            break
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                }
+            }
+            if (docXml.isBlank()) return listOf()
+            val prepared = docXml
+                .replace(Regex("</w:p\\b[^>]*>"), "\n\n")
+                .replace(Regex("<w:tab\\b[^/]*/?>"), "    ")
+                .replace(Regex("<w:br\\b[^/]*/?>"), "\n")
+            val plain = Html.fromHtml(prepared).toString()
+            chunkTextIntoSections(plain)
+        } catch (_: Exception) {
+            listOf()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun extractMobiAzwSections(context: Context, uri: Uri): List<String> {
+        return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return listOf()
+            if (bytes.isEmpty()) return listOf()
+
+            // Many MOBI/AZW files embed plain or HTML-tagged UTF-8/Latin-1 text blocks
+            val decoded = String(bytes, Charsets.ISO_8859_1)
+            val htmlMatch = Regex("<(?:html|body|div|p|h[1-6])[^>]*>.*", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+                .find(decoded)?.value
+
+            val sourceText = if (!htmlMatch.isNullOrBlank()) {
+                val withBreaks = htmlMatch
+                    .replace(Regex("</(p|div|h[1-6]|li|tr|br)\\b[^>]*>", RegexOption.IGNORE_CASE), "\n\n")
+                    .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+                Html.fromHtml(withBreaks).toString()
+            } else {
+                // Fallback: extract printable text runs from binary PalmDOC/MOBI records
+                val sb = StringBuilder(bytes.size / 2)
+                var runLen = 0
+                for (b in bytes) {
+                    val code = b.toInt() and 0xFF
+                    val isReadable = (code in 32..126) || code == 10 || code == 13 || code == 9 || code >= 160
+                    if (isReadable) {
+                        sb.append(code.toChar())
+                        runLen++
+                    } else if (runLen > 0) {
+                        sb.append(' ')
+                        runLen = 0
+                    }
+                }
+                sb.toString()
+            }
+
+            val cleaned = sourceText
+                .replace(Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]"), " ")
+                .replace(Regex("[ \\t]{2,}"), " ")
+                .replace(Regex("\n{3,}"), "\n\n")
+                .trim()
+
+            chunkTextIntoSections(cleaned)
+        } catch (_: Exception) {
+            listOf()
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun extractEpubChapters(context: Context, uri: Uri): List<String> {
         val chapters = mutableListOf<String>()
@@ -2702,220 +2899,4 @@ class MainActivity : ComponentActivity() {
                                 val buffer = ByteArrayOutputStream()
                                 val tmp = ByteArray(4096)
                                 var read = zip.read(tmp)
-                                while (read != -1) {
-                                    buffer.write(tmp, 0, read)
-                                    read = zip.read(tmp)
-                                }
-                                val rawHtml = buffer.toString("UTF-8")
-                                val plainText = Html.fromHtml(rawHtml).toString()
-                                    .replace(Regex("\n{3,}"), "\n\n")
-                                    .trim()
-                                if (plainText.isNotBlank()) {
-                                    chapters.add(plainText)
-                                }
-                            }
-                        }
-                        zip.closeEntry()
-                        entry = zip.nextEntry
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return chapters
-    }
-
-    private fun saveBooks(context: Context, books: List<BookItem>) {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        val arr = JSONArray()
-        for (b in books) {
-            val obj = JSONObject()
-            obj.put("uri", b.uriString)
-            obj.put("title", b.title)
-            obj.put("format", b.format)
-            obj.put("pageCount", b.pageCount)
-            obj.put("lastPage", b.lastPage)
-            obj.put("isFavorite", b.isFavorite)
-            obj.put("isTrashed", b.isTrashed)
-            obj.put("author", b.author)
-            obj.put("collection", b.collection)
-            arr.put(obj)
-        }
-        prefs.edit().putString("books_json", arr.toString()).apply()
-    }
-
-    private fun loadBooks(context: Context): List<BookItem> {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        val raw = prefs.getString("books_json", null) ?: return listOf()
-        return try {
-            val arr = JSONArray(raw)
-            val list = mutableListOf<BookItem>()
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                val title = obj.getString("title")
-                val fmt = obj.optString("format", "PDF")
-                list.add(
-                    BookItem(
-                        uriString = obj.getString("uri"),
-                        title = title,
-                        format = fmt,
-                        pageCount = obj.getInt("pageCount"),
-                        lastPage = obj.optInt("lastPage", 0),
-                        isFavorite = obj.optBoolean("isFavorite", false),
-                        isTrashed = obj.optBoolean("isTrashed", false),
-                        author = obj.optString("author", if (title.contains(" - ")) title.substringBefore(" - ").trim() else "Library"),
-                        collection = obj.optString("collection", if (fmt == "EPUB") "Ebooks" else "Documents"),
-                        cover = null,
-                        metadataLoaded = false
-                    )
-                )
-            }
-            list
-        } catch (_: Exception) {
-            listOf()
-        }
-    }
-
-    private fun getRawFileName(context: Context, uri: Uri): String {
-        var name = "Untitled Book"
-        try {
-            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (cursor.moveToFirst() && nameIndex >= 0) {
-                    name = cursor.getString(nameIndex) ?: name
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return name
-    }
-
-    private fun getPdfPageCount(context: Context, uri: Uri): Int {
-        return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                PdfRenderer(pfd).use { it.pageCount }
-            } ?: 0
-        } catch (_: Exception) {
-            0
-        }
-    }
-
-    private fun renderSinglePage(context: Context, uri: Uri, pageIndex: Int, scale: Float): Bitmap? {
-        return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                PdfRenderer(pfd).use { renderer ->
-                    if (pageIndex < 0 || pageIndex >= renderer.pageCount) return null
-                    renderer.openPage(pageIndex).use { page ->
-                        val w = (page.width * scale).toInt().coerceAtLeast(1)
-                        val h = (page.height * scale).toInt().coerceAtLeast(1)
-                        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                        bmp.eraseColor(Color.WHITE)
-                        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        bmp
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun renderAllPages(context: Context, uri: Uri): List<Bitmap> {
-        val result = mutableListOf<Bitmap>()
-        var pfd: ParcelFileDescriptor? = null
-        var renderer: PdfRenderer? = null
-        try {
-            pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return listOf()
-            renderer = PdfRenderer(pfd)
-            for (i in 0 until renderer.pageCount) {
-                renderer.openPage(i).use { page ->
-                    val scale = 1.5f
-                    val width = (page.width * scale).toInt().coerceAtLeast(1)
-                    val height = (page.height * scale).toInt().coerceAtLeast(1)
-                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                    bitmap.eraseColor(Color.WHITE)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    result.add(bitmap)
-                }
-            }
-        } catch (_: Exception) {
-            return listOf()
-        } finally {
-            try {
-                renderer?.close()
-            } catch (_: Exception) {
-            }
-            try {
-                pfd?.close()
-            } catch (_: Exception) {
-            }
-        }
-        return result
-    }
-}
-
-private fun cropSidesBitmap(
-    src: Bitmap,
-    leftFrac: Float,
-    topFrac: Float,
-    rightFrac: Float,
-    bottomFrac: Float
-): Bitmap {
-    val w = src.width
-    val h = src.height
-    if (w <= 2 || h <= 2) return src
-
-    val x0 = (w * leftFrac).toInt().coerceIn(0, w - 2)
-    val y0 = (h * topFrac).toInt().coerceIn(0, h - 2)
-    val x1 = (w * (1f - rightFrac)).toInt().coerceIn(x0 + 1, w)
-    val y1 = (h * (1f - bottomFrac)).toInt().coerceIn(y0 + 1, h)
-    val cropW = (x1 - x0).coerceAtLeast(1)
-    val cropH = (y1 - y0).coerceAtLeast(1)
-    return Bitmap.createBitmap(src, x0, y0, cropW, cropH)
-}
-
-private fun applyScanFilter(src: Bitmap, mode: ScanFilterMode): Bitmap {
-    if (mode == ScanFilterMode.ORIGINAL) return src
-    val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(out)
-    val cm = ColorMatrix()
-    when (mode) {
-        ScanFilterMode.ORIGINAL -> Unit
-        ScanFilterMode.DOC_BW -> {
-            cm.setSaturation(0f)
-            val contrast = 1.65f
-            val brightness = 16f
-            val bwMatrix = ColorMatrix(
-                floatArrayOf(
-                    contrast, 0f, 0f, 0f, brightness,
-                    0f, contrast, 0f, 0f, brightness,
-                    0f, 0f, contrast, 0f, brightness,
-                    0f, 0f, 0f, 1f, 0f
-                )
-            )
-            cm.postConcat(bwMatrix)
-        }
-        ScanFilterMode.MAGIC_COLOR -> {
-            cm.setSaturation(1.35f)
-            val contrast = 1.25f
-            val brightness = 8f
-            val colorMatrix = ColorMatrix(
-                floatArrayOf(
-                    contrast, 0f, 0f, 0f, brightness,
-                    0f, contrast, 0f, 0f, brightness,
-                    0f, 0f, contrast, 0f, brightness,
-                    0f, 0f, 0f, 1f, 0f
-                )
-            )
-            cm.postConcat(colorMatrix)
-        }
-        ScanFilterMode.GRAYSCALE -> {
-            cm.setSaturation(0f)
-        }
-    }
-    val paint = Paint().apply {
-        colorFilter = ColorMatrixColorFilter(cm)
-    }
-    canvas.drawBitmap(src, 0f, 0f, paint)
-    return out
-}
+                                while (
