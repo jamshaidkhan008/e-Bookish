@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -110,7 +111,6 @@ class MainActivity : ComponentActivity() {
                     var epubChapters by remember { mutableStateOf(listOf<String>()) }
                     var isLoadingReader by remember { mutableStateOf(false) }
 
-                    // Fast background enrichment: fill pageCount & cover gradually without blocking scan
                     LaunchedEffect(books.size) {
                         val pending = books.filter { !it.metadataLoaded }
                         if (pending.isNotEmpty()) {
@@ -418,24 +418,58 @@ class MainActivity : ComponentActivity() {
 
                                     Spacer(modifier = Modifier.height(6.dp))
 
-                                    HorizontalPager(
-                                        state = pagerState,
+                                    Box(
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxWidth()
-                                    ) { chapIndex ->
+                                    ) {
+                                        HorizontalPager(
+                                            state = pagerState,
+                                            modifier = Modifier.fillMaxSize()
+                                        ) { chapIndex ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .verticalScroll(rememberScrollState())
+                                                    .padding(horizontal = 24.dp, vertical = 10.dp)
+                                            ) {
+                                                Text(
+                                                    text = epubChapters[chapIndex],
+                                                    fontSize = (16f * zoomScale).sp,
+                                                    lineHeight = (24f * zoomScale).sp
+                                                )
+                                            }
+                                        }
+
+                                        // Left tap zone: go to previous EPUB section
                                         Box(
                                             modifier = Modifier
-                                                .fillMaxSize()
-                                                .verticalScroll(rememberScrollState())
-                                                .padding(8.dp)
-                                        ) {
-                                            Text(
-                                                text = epubChapters[chapIndex],
-                                                fontSize = (16f * zoomScale).sp,
-                                                lineHeight = (24f * zoomScale).sp
-                                            )
-                                        }
+                                                .align(Alignment.CenterStart)
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(0.22f)
+                                                .clickable {
+                                                    if (pagerState.currentPage > 0) {
+                                                        scope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                        }
+                                                    }
+                                                }
+                                        )
+
+                                        // Right tap zone: go to next EPUB section
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.CenterEnd)
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(0.22f)
+                                                .clickable {
+                                                    if (pagerState.currentPage < epubChapters.size - 1) {
+                                                        scope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                        }
+                                                    }
+                                                }
+                                        )
                                     }
 
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -519,33 +553,67 @@ class MainActivity : ComponentActivity() {
 
                                 Spacer(modifier = Modifier.height(6.dp))
 
-                                HorizontalPager(
-                                    state = pagerState,
+                                Box(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
-                                ) { pageIndex ->
-                                    val pageBmp: Bitmap = readerPages[pageIndex]
-                                    val imgWidthFraction = if (zoomScale < 0.5f) {
-                                        0.5f
-                                    } else if (zoomScale > 1f) {
-                                        1f
-                                    } else {
-                                        zoomScale
+                                ) {
+                                    HorizontalPager(
+                                        state = pagerState,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) { pageIndex ->
+                                        val pageBmp: Bitmap = readerPages[pageIndex]
+                                        val imgWidthFraction = if (zoomScale < 0.5f) {
+                                            0.5f
+                                        } else if (zoomScale > 1f) {
+                                            1f
+                                        } else {
+                                            zoomScale
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .verticalScroll(rememberScrollState()),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Image(
+                                                bitmap = pageBmp.asImageBitmap(),
+                                                contentDescription = "Page ${pageIndex + 1}",
+                                                modifier = Modifier.fillMaxWidth(imgWidthFraction),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        }
                                     }
+
+                                    // Left tap zone: go to previous PDF page
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxSize()
-                                            .verticalScroll(rememberScrollState()),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Image(
-                                            bitmap = pageBmp.asImageBitmap(),
-                                            contentDescription = "Page ${pageIndex + 1}",
-                                            modifier = Modifier.fillMaxWidth(imgWidthFraction),
-                                            contentScale = ContentScale.Fit
-                                        )
-                                    }
+                                            .align(Alignment.CenterStart)
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(0.2f)
+                                            .clickable {
+                                                if (pagerState.currentPage > 0) {
+                                                    scope.launch {
+                                                        pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                    }
+                                                }
+                                            }
+                                    )
+
+                                    // Right tap zone: go to next PDF page
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.CenterEnd)
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(0.2f)
+                                            .clickable {
+                                                if (pagerState.currentPage < readerPages.size - 1) {
+                                                    scope.launch {
+                                                        pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                    }
+                                                }
+                                            }
+                                    )
                                 }
 
                                 Spacer(modifier = Modifier.height(8.dp))
