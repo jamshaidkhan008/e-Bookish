@@ -3,7 +3,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="DocuVerse"
+        android:label="e-Bookish"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true">
 
