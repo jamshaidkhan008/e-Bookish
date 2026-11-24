@@ -258,13 +258,7 @@ class MainActivity : ComponentActivity() {
 
                     fun startScanWithPermissionCheck() {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            val docPerm = Manifest.permission.READ_MEDIA_DOCUMENTS
-                            val granted = ContextCompat.checkSelfPermission(context, docPerm) == PackageManager.PERMISSION_GRANTED
-                            if (granted) {
-                                runPdfScanNow()
-                            } else {
-                                runPdfScanNow()
-                            }
+                            runPdfScanNow()
                         } else {
                             val readPerm = Manifest.permission.READ_EXTERNAL_STORAGE
                             val granted = ContextCompat.checkSelfPermission(context, readPerm) == PackageManager.PERMISSION_GRANTED
