@@ -31,6 +31,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas as ComposeCanvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,6 +56,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -68,7 +70,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -76,6 +77,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,6 +97,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -134,6 +137,27 @@ enum class ScanFilterMode(val label: String) {
     DOC_BW("Doc B&W"),
     MAGIC_COLOR("Magic Color"),
     GRAYSCALE("Grayscale")
+}
+
+enum class EpubPageTheme(
+    val label: String,
+    val bgColor: ComposeColor,
+    val textColor: ComposeColor,
+    val chromeBg: ComposeColor
+) {
+    OLD_YELLOW("Old Yellow", ComposeColor(0xFFF3E5B5), ComposeColor(0xFF2B2114), ComposeColor(0xFFE6D49C)),
+    LIGHT_RUSTY_YELLOW("Rusty Gold", ComposeColor(0xFFEED394), ComposeColor(0xFF291D0D), ComposeColor(0xFFDFC07C)),
+    LIGHT_GREEN("Soft Mint", ComposeColor(0xFFDCEFD9), ComposeColor(0xFF17291B), ComposeColor(0xFFC8E2C4)),
+    LIGHT_PURPLE("Soft Lilac", ComposeColor(0xFFE7DDF5), ComposeColor(0xFF221A33), ComposeColor(0xFFD6C8EC)),
+    PAPER_WHITE("Day White", ComposeColor(0xFFFAF9F5), ComposeColor(0xFF1C1B18), ComposeColor(0xFFECEAE2)),
+    WARM_SEPIA("Warm Sepia", ComposeColor(0xFFE8D8C3), ComposeColor(0xFF2E2013), ComposeColor(0xFFD7C3A8)),
+    NIGHT_SLATE("Night Slate", ComposeColor(0xFF0E1A21), ComposeColor(0xFFDCE6EC), ComposeColor(0xFF152630))
+}
+
+enum class EpubFontStyleOption(val label: String, val family: FontFamily) {
+    SERIF("Serif", FontFamily.Serif),
+    SANS("Sans", FontFamily.SansSerif),
+    MONO("Mono", FontFamily.Monospace)
 }
 
 data class SideCrop(
@@ -371,6 +395,12 @@ class MainActivity : ComponentActivity() {
                     var scanNotice by remember { mutableStateOf("") }
                     var isScanning by remember { mutableStateOf(false) }
                     var showDocScanner by remember { mutableStateOf(false) }
+
+                    // ReadEra EPUB reader customization settings
+                    var epubPageTheme by remember { mutableStateOf(EpubPageTheme.OLD_YELLOW) }
+                    var epubFontSizeSp by remember { mutableFloatStateOf(19f) }
+                    var epubFontStyle by remember { mutableStateOf(EpubFontStyleOption.SERIF) }
+                    var epubLineSpacingMult by remember { mutableFloatStateOf(1.45f) }
 
                     var activeBook by remember { mutableStateOf<BookItem?>(null) }
                     var readerPages by remember { mutableStateOf(listOf<Bitmap>()) }
@@ -633,7 +663,7 @@ class MainActivity : ComponentActivity() {
                                 )
                                 scanPages = scanPages + newPage
                                 selectedIndex = scanPages.lastIndex
-                                docStatus = "Captured page ${scanPages.size}. Drag sliders to live-cut sides."
+                                docStatus = "Captured page ${scanPages.size}."
                             } else {
                                 docStatus = "Camera capture cancelled."
                             }
@@ -1099,84 +1129,200 @@ class MainActivity : ComponentActivity() {
                         }
 
                         var zoomScale by remember(currentBook.uriString) { mutableStateOf(1f) }
+                        var showAaPanel by remember { mutableStateOf(false) }
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 14.dp, vertical = 20.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        if (currentBook.format == "EPUB") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(epubPageTheme.bgColor)
                             ) {
-                                OutlinedButton(onClick = {
-                                    activeBook = null
-                                    readerPages = listOf()
-                                    epubChapters = listOf()
-                                }) {
-                                    Text("Shelf", maxLines = 1, softWrap = false)
-                                }
-                                Text(
-                                    text = currentBook.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                                // Clean top bar with Shelf, Book Title, and ReadEra Aa style button
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(epubPageTheme.chromeBg)
+                                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            activeBook = null
+                                            epubChapters = listOf()
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "Shelf",
+                                            color = epubPageTheme.textColor,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
 
-                            Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = currentBook.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = epubPageTheme.textColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        val next = zoomScale - 0.25f
-                                        zoomScale = if (next < 0.75f) 0.75f else next
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Zoom -", maxLines = 1, softWrap = false)
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        val next = zoomScale + 0.25f
-                                        zoomScale = if (next > 2.5f) 2.5f else next
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Zoom +", maxLines = 1, softWrap = false)
-                                }
-                                OutlinedButton(
-                                    onClick = { zoomScale = 1f },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("${(zoomScale * 100).toInt()}%", maxLines = 1, softWrap = false)
-                                }
-                            }
-
-                            if (isLoadingReader) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        CircularProgressIndicator()
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        Text("Opening book...")
+                                    OutlinedButton(
+                                        onClick = { showAaPanel = !showAaPanel },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "Aa",
+                                            color = epubPageTheme.textColor,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
                                     }
                                 }
-                            } else if (currentBook.format == "EPUB") {
-                                if (epubChapters.isEmpty()) {
+
+                                // ReadEra style typography & page background panel
+                                if (showAaPanel) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(epubPageTheme.chromeBg)
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        // Page backgrounds: Old Yellow, Rusty Gold, Soft Mint, Soft Lilac, Day White, Warm Sepia, Night Slate
+                                        Text(
+                                            text = "Page Background: ${epubPageTheme.label}",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = epubPageTheme.textColor
+                                        )
+                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            items(EpubPageTheme.entries) { themeOpt ->
+                                                val isCurr = epubPageTheme == themeOpt
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    modifier = Modifier.clickable { epubPageTheme = themeOpt }
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(34.dp)
+                                                            .clip(CircleShape)
+                                                            .background(themeOpt.bgColor)
+                                                            .border(
+                                                                width = if (isCurr) 3.dp else 1.dp,
+                                                                color = if (isCurr) MaterialTheme.colorScheme.primary else epubPageTheme.textColor.copy(alpha = 0.4f),
+                                                                shape = CircleShape
+                                                            )
+                                                    )
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = themeOpt.label,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = epubPageTheme.textColor,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Font size controls
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Font Size: ${epubFontSizeSp.toInt()}sp",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = epubPageTheme.textColor
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                OutlinedButton(
+                                                    onClick = { epubFontSizeSp = (epubFontSizeSp - 2f).coerceAtLeast(14f) },
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("A-", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { epubFontSizeSp = (epubFontSizeSp + 2f).coerceAtMost(28f) },
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("A+", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                }
+                                            }
+                                        }
+
+                                        // Font style options (Serif, Sans, Mono)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            for (fOpt in EpubFontStyleOption.entries) {
+                                                OutlinedButton(
+                                                    onClick = { epubFontStyle = fOpt },
+                                                    modifier = Modifier.weight(1f),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (epubFontStyle == fOpt) "${fOpt.label} ✓" else fOpt.label,
+                                                        color = epubPageTheme.textColor,
+                                                        fontFamily = fOpt.family,
+                                                        maxLines = 1,
+                                                        softWrap = false
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Line spacing / line distance options
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Line Spacing: ${String.format(Locale.US, "%.2f", epubLineSpacingMult)}x",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = epubPageTheme.textColor
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                OutlinedButton(
+                                                    onClick = { epubLineSpacingMult = (epubLineSpacingMult - 0.15f).coerceAtLeast(1.1f) },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Tighter", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { epubLineSpacingMult = (epubLineSpacingMult + 0.15f).coerceAtMost(2.0f) },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Wider", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (isLoadingReader) {
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("Could not read readable text from this EPUB.")
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            CircularProgressIndicator(color = epubPageTheme.textColor)
+                                            Spacer(modifier = Modifier.height(10.dp))
+                                            Text("Opening book...", color = epubPageTheme.textColor)
+                                        }
+                                    }
+                                } else if (epubChapters.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("Could not read readable text from this EPUB.", color = epubPageTheme.textColor)
                                     }
                                 } else {
                                     val maxIdx = epubChapters.size - 1
@@ -1204,14 +1350,6 @@ class MainActivity : ComponentActivity() {
                                         saveBooks(context, updatedBooks)
                                     }
 
-                                    Text(
-                                        text = "Section ${pagerState.currentPage + 1} of ${epubChapters.size} (EPUB)",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                                    )
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
@@ -1225,16 +1363,20 @@ class MainActivity : ComponentActivity() {
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .verticalScroll(rememberScrollState())
-                                                    .padding(horizontal = 24.dp, vertical = 10.dp)
+                                                    .padding(horizontal = 24.dp, vertical = 14.dp)
                                             ) {
+                                                val computedLineSp = (epubFontSizeSp * epubLineSpacingMult).sp
                                                 Text(
                                                     text = epubChapters[chapIndex],
-                                                    fontSize = (16f * zoomScale).sp,
-                                                    lineHeight = (24f * zoomScale).sp
+                                                    color = epubPageTheme.textColor,
+                                                    fontFamily = epubFontStyle.family,
+                                                    fontSize = epubFontSizeSp.sp,
+                                                    lineHeight = computedLineSp
                                                 )
                                             }
                                         }
 
+                                        // Left & right invisible tap zones to turn sections cleanly
                                         Box(
                                             modifier = Modifier
                                                 .align(Alignment.CenterStart)
@@ -1264,6 +1406,201 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
 
+                                    // Minimal bottom progress strip
+                                    val pct = ((pagerState.currentPage + 1) * 100) / epubChapters.size
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(epubPageTheme.chromeBg)
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Sec ${pagerState.currentPage + 1}/${epubChapters.size}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = epubPageTheme.textColor.copy(alpha = 0.8f)
+                                        )
+                                        Text(
+                                            text = "$pct%",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = epubPageTheme.textColor.copy(alpha = 0.8f)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 14.dp, vertical = 20.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(onClick = {
+                                        activeBook = null
+                                        readerPages = listOf()
+                                    }) {
+                                        Text("Shelf", maxLines = 1, softWrap = false)
+                                    }
+                                    Text(
+                                        text = currentBook.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            val next = zoomScale - 0.25f
+                                            zoomScale = if (next < 0.75f) 0.75f else next
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Zoom -", maxLines = 1, softWrap = false)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            val next = zoomScale + 0.25f
+                                            zoomScale = if (next > 2.5f) 2.5f else next
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Zoom +", maxLines = 1, softWrap = false)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { zoomScale = 1f },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("${(zoomScale * 100).toInt()}%", maxLines = 1, softWrap = false)
+                                    }
+                                }
+
+                                if (isLoadingReader) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            CircularProgressIndicator()
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Text("Opening book...")
+                                        }
+                                    }
+                                } else if (readerPages.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("Could not open this PDF file.")
+                                    }
+                                } else {
+                                    val maxIdx = readerPages.size - 1
+                                    val safeStart = if (currentBook.lastPage < 0) {
+                                        0
+                                    } else if (currentBook.lastPage > maxIdx) {
+                                        maxIdx
+                                    } else {
+                                        currentBook.lastPage
+                                    }
+                                    val pagerState = rememberPagerState(
+                                        initialPage = safeStart,
+                                        pageCount = { readerPages.size }
+                                    )
+
+                                    LaunchedEffect(pagerState.currentPage) {
+                                        val updatedBooks = books.map {
+                                            if (it.uriString == currentBook.uriString) {
+                                                it.copy(lastPage = pagerState.currentPage)
+                                            } else {
+                                                it
+                                            }
+                                        }
+                                        books = updatedBooks
+                                        saveBooks(context, updatedBooks)
+                                    }
+
+                                    Text(
+                                        text = "Page ${pagerState.currentPage + 1} of ${readerPages.size}",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                                    )
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxWidth()
+                                    ) {
+                                        HorizontalPager(
+                                            state = pagerState,
+                                            modifier = Modifier.fillMaxSize()
+                                        ) { pageIndex ->
+                                            val pageBmp: Bitmap = readerPages[pageIndex]
+                                            val imgWidthFraction = if (zoomScale < 0.5f) {
+                                                0.5f
+                                            } else if (zoomScale > 1f) {
+                                                1f
+                                            } else {
+                                                zoomScale
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .verticalScroll(rememberScrollState()),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Image(
+                                                    bitmap = pageBmp.asImageBitmap(),
+                                                    contentDescription = "Page ${pageIndex + 1}",
+                                                    modifier = Modifier.fillMaxWidth(imgWidthFraction),
+                                                    contentScale = ContentScale.Fit
+                                                )
+                                            }
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.CenterStart)
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(0.2f)
+                                                .clickable {
+                                                    if (pagerState.currentPage > 0) {
+                                                        scope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                        }
+                                                    }
+                                                }
+                                        )
+
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.CenterEnd)
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(0.2f)
+                                                .clickable {
+                                                    if (pagerState.currentPage < readerPages.size - 1) {
+                                                        scope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                        }
+                                                    }
+                                                }
+                                        )
+                                    }
+
                                     Spacer(modifier = Modifier.height(8.dp))
 
                                     Row(
@@ -1285,164 +1622,23 @@ class MainActivity : ComponentActivity() {
                                         }
 
                                         Text(
-                                            text = "${((pagerState.currentPage + 1) * 100) / epubChapters.size}%",
+                                            text = "${((pagerState.currentPage + 1) * 100) / readerPages.size}%",
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Bold
                                         )
 
                                         OutlinedButton(
                                             onClick = {
-                                                if (pagerState.currentPage < epubChapters.size - 1) {
-                                                    scope.launch {
-                                                        pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                                    }
-                                                }
-                                            },
-                                            enabled = pagerState.currentPage < epubChapters.size - 1
-                                        ) {
-                                            Text("Next", maxLines = 1, softWrap = false)
-                                        }
-                                    }
-                                }
-                            } else if (readerPages.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("Could not open this PDF file.")
-                                }
-                            } else {
-                                val maxIdx = readerPages.size - 1
-                                val safeStart = if (currentBook.lastPage < 0) {
-                                    0
-                                } else if (currentBook.lastPage > maxIdx) {
-                                    maxIdx
-                                } else {
-                                    currentBook.lastPage
-                                }
-                                val pagerState = rememberPagerState(
-                                    initialPage = safeStart,
-                                    pageCount = { readerPages.size }
-                                )
-
-                                LaunchedEffect(pagerState.currentPage) {
-                                    val updatedBooks = books.map {
-                                        if (it.uriString == currentBook.uriString) {
-                                            it.copy(lastPage = pagerState.currentPage)
-                                        } else {
-                                            it
-                                        }
-                                    }
-                                    books = updatedBooks
-                                    saveBooks(context, updatedBooks)
-                                }
-
-                                Text(
-                                    text = "Page ${pagerState.currentPage + 1} of ${readerPages.size}",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                                )
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth()
-                                ) {
-                                    HorizontalPager(
-                                        state = pagerState,
-                                        modifier = Modifier.fillMaxSize()
-                                    ) { pageIndex ->
-                                        val pageBmp: Bitmap = readerPages[pageIndex]
-                                        val imgWidthFraction = if (zoomScale < 0.5f) {
-                                            0.5f
-                                        } else if (zoomScale > 1f) {
-                                            1f
-                                        } else {
-                                            zoomScale
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .verticalScroll(rememberScrollState()),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Image(
-                                                bitmap = pageBmp.asImageBitmap(),
-                                                contentDescription = "Page ${pageIndex + 1}",
-                                                modifier = Modifier.fillMaxWidth(imgWidthFraction),
-                                                contentScale = ContentScale.Fit
-                                            )
-                                        }
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.CenterStart)
-                                            .fillMaxHeight()
-                                            .fillMaxWidth(0.2f)
-                                            .clickable {
-                                                if (pagerState.currentPage > 0) {
-                                                    scope.launch {
-                                                        pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                                                    }
-                                                }
-                                            }
-                                    )
-
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.CenterEnd)
-                                            .fillMaxHeight()
-                                            .fillMaxWidth(0.2f)
-                                            .clickable {
                                                 if (pagerState.currentPage < readerPages.size - 1) {
                                                     scope.launch {
                                                         pagerState.animateScrollToPage(pagerState.currentPage + 1)
                                                     }
                                                 }
-                                            }
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            if (pagerState.currentPage > 0) {
-                                                scope.launch {
-                                                    pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                                                }
-                                            }
-                                        },
-                                        enabled = pagerState.currentPage > 0
-                                    ) {
-                                        Text("Previous", maxLines = 1, softWrap = false)
-                                    }
-
-                                    Text(
-                                        text = "${((pagerState.currentPage + 1) * 100) / readerPages.size}%",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-
-                                    OutlinedButton(
-                                        onClick = {
-                                            if (pagerState.currentPage < readerPages.size - 1) {
-                                                scope.launch {
-                                                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                                }
-                                            }
-                                        },
-                                        enabled = pagerState.currentPage < readerPages.size - 1
-                                    ) {
-                                        Text("Next", maxLines = 1, softWrap = false)
+                                            },
+                                            enabled = pagerState.currentPage < readerPages.size - 1
+                                        ) {
+                                            Text("Next", maxLines = 1, softWrap = false)
+                                        }
                                     }
                                 }
                             }
@@ -1492,7 +1688,6 @@ class MainActivity : ComponentActivity() {
                                     .fillMaxSize()
                                     .padding(horizontal = 14.dp, vertical = 22.dp)
                             ) {
-                                // ReadEra top bar with custom DocuVerse app icon graphic, Drawer toggle, Section title, Overflow menu
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1597,7 +1792,6 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
 
-                                // Sub-filter chips when viewing Formats, Authors, Collections, or Settings
                                 if (section == ReadEraSection.FORMATS) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1964,7 +2158,6 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            // Slide-out ReadEra style drawer with graphic icons and all categories
                             if (showDrawer) {
                                 BackHandler { showDrawer = false }
                                 Row(modifier = Modifier.fillMaxSize()) {
@@ -2350,7 +2543,9 @@ class MainActivity : ComponentActivity() {
                                     read = zip.read(tmp)
                                 }
                                 val rawHtml = buffer.toString("UTF-8")
-                                val plainText = Html.fromHtml(rawHtml).toString().trim()
+                                val plainText = Html.fromHtml(rawHtml).toString()
+                                    .replace(Regex("\n{3,}"), "\n\n")
+                                    .trim()
                                 if (plainText.isNotBlank()) {
                                     chapters.add(plainText)
                                 }
