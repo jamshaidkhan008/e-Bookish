@@ -28,6 +28,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas as ComposeCanvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -63,6 +65,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -70,6 +73,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -80,7 +84,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -103,8 +115,18 @@ enum class LibraryViewMode {
     GRID_3, GRID_2, LIST
 }
 
-enum class ShelfSection {
-    ALL_BOOKS, RECENT, BOOKMARKS
+enum class ReadEraSection(val label: String) {
+    READING_NOW("Reading Now"),
+    BOOKS_AND_DOCS("Books & documents"),
+    FAVORITES("Favorites"),
+    TO_READ("To Read"),
+    HAVE_READ("Have Read"),
+    AUTHORS("Authors"),
+    SERIES("Series"),
+    COLLECTIONS("Collections"),
+    FORMATS("Formats"),
+    TRASH("Trash"),
+    SETTINGS("Settings")
 }
 
 enum class ScanFilterMode(val label: String) {
@@ -138,6 +160,10 @@ data class BookItem(
     val format: String = "PDF",
     val pageCount: Int,
     val lastPage: Int = 0,
+    val isFavorite: Boolean = false,
+    val isTrashed: Boolean = false,
+    val author: String = "Unknown Author",
+    val collection: String = "General",
     val cover: Bitmap? = null,
     val metadataLoaded: Boolean = false
 )
@@ -149,29 +175,167 @@ data class ExportedScanResult(
     val bookItem: BookItem? = null
 )
 
-private val MoonDarkScheme = darkColorScheme(
-    primary = androidx.compose.ui.graphics.Color(0xFFD7A86E),
-    onPrimary = androidx.compose.ui.graphics.Color(0xFF1A140C),
-    background = androidx.compose.ui.graphics.Color(0xFF1A1918),
-    onBackground = androidx.compose.ui.graphics.Color(0xFFEDE8E0),
-    surface = androidx.compose.ui.graphics.Color(0xFF282522),
-    onSurface = androidx.compose.ui.graphics.Color(0xFFEDE8E0),
-    surfaceVariant = androidx.compose.ui.graphics.Color(0xFF36312C),
-    onSurfaceVariant = androidx.compose.ui.graphics.Color(0xFFC7BFB3),
-    error = androidx.compose.ui.graphics.Color(0xFFFF6B6B)
+private val ReadEraDarkScheme = darkColorScheme(
+    primary = ComposeColor(0xFF4BA3E3),
+    onPrimary = ComposeColor(0xFF07131A),
+    background = ComposeColor(0xFF0E1A21),
+    onBackground = ComposeColor(0xFFE6EEF3),
+    surface = ComposeColor(0xFF13232C),
+    onSurface = ComposeColor(0xFFE6EEF3),
+    surfaceVariant = ComposeColor(0xFF1C313D),
+    onSurfaceVariant = ComposeColor(0xFF9EB2BE),
+    error = ComposeColor(0xFFFF6B6B)
 )
 
-private val MoonDayScheme = lightColorScheme(
-    primary = androidx.compose.ui.graphics.Color(0xFF6B4F2A),
-    onPrimary = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
-    background = androidx.compose.ui.graphics.Color(0xFFF3EFE6),
-    onBackground = androidx.compose.ui.graphics.Color(0xFF1E1B18),
-    surface = androidx.compose.ui.graphics.Color(0xFFFFFCF7),
-    onSurface = androidx.compose.ui.graphics.Color(0xFF1E1B18),
-    surfaceVariant = androidx.compose.ui.graphics.Color(0xFFE5DEC9),
-    onSurfaceVariant = androidx.compose.ui.graphics.Color(0xFF4D463D),
-    error = androidx.compose.ui.graphics.Color(0xFFB3261E)
+private val ReadEraLightScheme = lightColorScheme(
+    primary = ComposeColor(0xFF1A6FA8),
+    onPrimary = ComposeColor(0xFFFFFFFF),
+    background = ComposeColor(0xFFF2F5F7),
+    onBackground = ComposeColor(0xFF132028),
+    surface = ComposeColor(0xFFFFFFFF),
+    onSurface = ComposeColor(0xFF132028),
+    surfaceVariant = ComposeColor(0xFFE1E8ED),
+    onSurfaceVariant = ComposeColor(0xFF4A5C68),
+    error = ComposeColor(0xFFB3261E)
 )
+
+@Composable
+private fun ReadEraGraphicIcon(
+    kind: String,
+    tint: ComposeColor,
+    modifier: Modifier = Modifier.size(22.dp)
+) {
+    ComposeCanvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = Stroke(width = w * 0.09f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        when (kind) {
+            "READING_NOW" -> {
+                drawArc(
+                    color = tint,
+                    startAngle = 30f,
+                    sweepAngle = 120f,
+                    useCenter = false,
+                    topLeft = Offset(w * 0.16f, h * 0.16f),
+                    size = Size(w * 0.68f, h * 0.68f),
+                    style = stroke
+                )
+                drawArc(
+                    color = tint,
+                    startAngle = 210f,
+                    sweepAngle = 120f,
+                    useCenter = false,
+                    topLeft = Offset(w * 0.16f, h * 0.16f),
+                    size = Size(w * 0.68f, h * 0.68f),
+                    style = stroke
+                )
+            }
+            "BOOKS" -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(w * 0.16f, h * 0.18f),
+                    size = Size(w * 0.68f, h * 0.64f),
+                    cornerRadius = CornerRadius(w * 0.08f, w * 0.08f),
+                    style = stroke
+                )
+                drawLine(tint, Offset(w * 0.5f, h * 0.18f), Offset(w * 0.5f, h * 0.82f), w * 0.08f)
+            }
+            "FAVORITES" -> {
+                val star = Path().apply {
+                    moveTo(w * 0.5f, h * 0.14f)
+                    lineTo(w * 0.62f, h * 0.38f)
+                    lineTo(w * 0.88f, h * 0.41f)
+                    lineTo(w * 0.69f, h * 0.59f)
+                    lineTo(w * 0.74f, h * 0.85f)
+                    lineTo(w * 0.5f, h * 0.72f)
+                    lineTo(w * 0.26f, h * 0.85f)
+                    lineTo(w * 0.31f, h * 0.59f)
+                    lineTo(w * 0.12f, h * 0.41f)
+                    lineTo(w * 0.38f, h * 0.38f)
+                    close()
+                }
+                drawPath(star, color = tint, style = stroke)
+            }
+            "TO_READ" -> {
+                drawCircle(
+                    color = tint,
+                    radius = w * 0.34f,
+                    center = Offset(w * 0.5f, h * 0.5f),
+                    style = stroke
+                )
+                drawLine(tint, Offset(w * 0.5f, h * 0.5f), Offset(w * 0.5f, h * 0.30f), w * 0.08f, StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.5f, h * 0.5f), Offset(w * 0.66f, h * 0.56f), w * 0.08f, StrokeCap.Round)
+            }
+            "HAVE_READ" -> {
+                drawLine(tint, Offset(w * 0.20f, h * 0.52f), Offset(w * 0.42f, h * 0.74f), w * 0.09f, StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.42f, h * 0.74f), Offset(w * 0.82f, h * 0.28f), w * 0.09f, StrokeCap.Round)
+            }
+            "AUTHORS" -> {
+                drawCircle(tint, radius = w * 0.18f, center = Offset(w * 0.5f, h * 0.32f))
+                drawArc(
+                    color = tint,
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = true,
+                    topLeft = Offset(w * 0.20f, h * 0.52f),
+                    size = Size(w * 0.60f, h * 0.36f)
+                )
+            }
+            "SERIES" -> {
+                val tag = Path().apply {
+                    moveTo(w * 0.22f, h * 0.20f)
+                    lineTo(w * 0.56f, h * 0.20f)
+                    lineTo(w * 0.82f, h * 0.50f)
+                    lineTo(w * 0.56f, h * 0.80f)
+                    lineTo(w * 0.22f, h * 0.80f)
+                    close()
+                }
+                drawPath(tag, color = tint, style = stroke)
+            }
+            "COLLECTIONS" -> {
+                drawRect(tint, topLeft = Offset(w * 0.20f, h * 0.22f), size = Size(w * 0.14f, h * 0.56f))
+                drawRect(tint, topLeft = Offset(w * 0.42f, h * 0.22f), size = Size(w * 0.14f, h * 0.56f))
+                drawLine(tint, Offset(w * 0.66f, h * 0.24f), Offset(w * 0.82f, h * 0.76f), w * 0.11f, StrokeCap.Round)
+            }
+            "FORMATS" -> {
+                drawRoundRect(tint, Offset(w * 0.20f, h * 0.24f), Size(w * 0.60f, h * 0.18f), CornerRadius(6f, 6f), style = stroke)
+                drawRoundRect(tint, Offset(w * 0.20f, h * 0.46f), Size(w * 0.60f, h * 0.18f), CornerRadius(6f, 6f), style = stroke)
+                drawRoundRect(tint, Offset(w * 0.20f, h * 0.68f), Size(w * 0.60f, h * 0.14f), CornerRadius(6f, 6f), style = stroke)
+            }
+            "FOLDERS" -> {
+                val folder = Path().apply {
+                    moveTo(w * 0.16f, h * 0.26f)
+                    lineTo(w * 0.42f, h * 0.26f)
+                    lineTo(w * 0.50f, h * 0.36f)
+                    lineTo(w * 0.84f, h * 0.36f)
+                    lineTo(w * 0.84f, h * 0.78f)
+                    lineTo(w * 0.16f, h * 0.78f)
+                    close()
+                }
+                drawPath(folder, color = tint)
+            }
+            "DOWNLOADS" -> {
+                drawLine(tint, Offset(w * 0.5f, h * 0.20f), Offset(w * 0.5f, h * 0.62f), w * 0.09f, StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.30f, h * 0.44f), Offset(w * 0.5f, h * 0.64f), w * 0.09f, StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.70f, h * 0.44f), Offset(w * 0.5f, h * 0.64f), w * 0.09f, StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.22f, h * 0.80f), Offset(w * 0.78f, h * 0.80f), w * 0.09f, StrokeCap.Round)
+            }
+            "TRASH" -> {
+                drawRoundRect(tint, Offset(w * 0.26f, h * 0.30f), Size(w * 0.48f, h * 0.52f), CornerRadius(6f, 6f), style = stroke)
+                drawLine(tint, Offset(w * 0.18f, h * 0.24f), Offset(w * 0.82f, h * 0.24f), w * 0.08f, StrokeCap.Round)
+            }
+            "SETTINGS" -> {
+                drawCircle(tint, radius = w * 0.26f, center = Offset(w * 0.5f, h * 0.5f), style = stroke)
+                drawCircle(tint, radius = w * 0.09f, center = Offset(w * 0.5f, h * 0.5f))
+            }
+            else -> {
+                drawRoundRect(tint, Offset(w * 0.18f, h * 0.22f), Size(w * 0.64f, h * 0.48f), CornerRadius(8f, 8f), style = stroke)
+                drawLine(tint, Offset(w * 0.5f, h * 0.32f), Offset(w * 0.5f, h * 0.50f), w * 0.09f, StrokeCap.Round)
+                drawCircle(tint, radius = w * 0.055f, center = Offset(w * 0.5f, h * 0.60f))
+            }
+        }
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -179,19 +343,22 @@ class MainActivity : ComponentActivity() {
         setContent {
             var isDarkTheme by remember { mutableStateOf(true) }
 
-            androidx.compose.material3.MaterialTheme(
-                colorScheme = if (isDarkTheme) MoonDarkScheme else MoonDayScheme
+            MaterialTheme(
+                colorScheme = if (isDarkTheme) ReadEraDarkScheme else ReadEraLightScheme
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.background
+                    color = MaterialTheme.colorScheme.background
                 ) {
                     val context = LocalContext.current
                     val scope = rememberCoroutineScope()
 
                     var books by remember { mutableStateOf(loadBooks(context)) }
                     var viewMode by remember { mutableStateOf(LibraryViewMode.GRID_3) }
-                    var shelfSection by remember { mutableStateOf(ShelfSection.ALL_BOOKS) }
+                    var section by remember { mutableStateOf(ReadEraSection.BOOKS_AND_DOCS) }
+                    var formatFilter by remember { mutableStateOf("ALL") }
+                    var authorFilter by remember { mutableStateOf("ALL") }
+                    var collectionFilter by remember { mutableStateOf("ALL") }
                     var useDefaultCovers by remember { mutableStateOf(false) }
                     var showDrawer by remember { mutableStateOf(false) }
                     var showOverflowMenu by remember { mutableStateOf(false) }
@@ -310,6 +477,10 @@ class MainActivity : ComponentActivity() {
                             format = if (isEpub) "EPUB" else "PDF",
                             pageCount = 1,
                             lastPage = 0,
+                            isFavorite = false,
+                            isTrashed = false,
+                            author = if (title.contains(" - ")) title.substringBefore(" - ").trim() else "Library",
+                            collection = if (isEpub) "Ebooks" else "Documents",
                             cover = null,
                             metadataLoaded = false
                         )
@@ -462,7 +633,7 @@ class MainActivity : ComponentActivity() {
                                 )
                                 scanPages = scanPages + newPage
                                 selectedIndex = scanPages.lastIndex
-                                docStatus = "Captured page ${scanPages.size}. Drag Left/Right/Top/Bottom sliders to live-cut."
+                                docStatus = "Captured page ${scanPages.size}. Drag sliders to live-cut sides."
                             } else {
                                 docStatus = "Camera capture cancelled."
                             }
@@ -493,7 +664,7 @@ class MainActivity : ComponentActivity() {
                                             val startIdx = scanPages.size
                                             scanPages = scanPages + loadedPages
                                             selectedIndex = startIdx.coerceIn(0, scanPages.lastIndex)
-                                            docStatus = "Added ${loadedPages.size} gallery photo(s). Select a page and live-cut sides."
+                                            docStatus = "Added ${loadedPages.size} gallery photo(s)."
                                         } else {
                                             docStatus = "Could not load selected gallery photos."
                                         }
@@ -525,7 +696,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 Text(
                                     text = "DocuVerse Scan Studio",
-                                    style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
+                                    style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -596,7 +767,7 @@ class MainActivity : ComponentActivity() {
 
                                 Text(
                                     text = "Filter (Page ${safeIdx + 1})",
-                                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 LazyRow(
@@ -637,12 +808,12 @@ class MainActivity : ComponentActivity() {
                                         ) {
                                             Text(
                                                 text = "Live Cut Preview • Page ${safeIdx + 1}",
-                                                style = androidx.compose.material3.MaterialTheme.typography.labelLarge
+                                                style = MaterialTheme.typography.labelLarge
                                             )
                                             Text(
                                                 text = "Delete Page",
-                                                style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
-                                                color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.clickable {
                                                     val nextList = scanPages.filterIndexed { i, _ -> i != safeIdx }
                                                     scanPages = nextList
@@ -672,7 +843,7 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     Text(
                                         text = "Live Side Cut Controls",
-                                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     OutlinedButton(
@@ -684,7 +855,7 @@ class MainActivity : ComponentActivity() {
 
                                 Text(
                                     text = "Left: ${(currentPage.crop.left * 100).toInt()}%   •   Right: ${(currentPage.crop.right * 100).toInt()}%",
-                                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall
+                                    style = MaterialTheme.typography.labelSmall
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -712,7 +883,7 @@ class MainActivity : ComponentActivity() {
 
                                 Text(
                                     text = "Top: ${(currentPage.crop.top * 100).toInt()}%   •   Bottom: ${(currentPage.crop.bottom * 100).toInt()}%",
-                                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall
+                                    style = MaterialTheme.typography.labelSmall
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -744,12 +915,12 @@ class MainActivity : ComponentActivity() {
                                         .fillMaxWidth()
                                         .height(170.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant),
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = "Tap 'Gallery Photos' to pick from your phone gallery or 'Camera' to snap a page.",
-                                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                                        style = MaterialTheme.typography.bodyMedium,
                                         modifier = Modifier.padding(16.dp)
                                     )
                                 }
@@ -782,6 +953,10 @@ class MainActivity : ComponentActivity() {
                                                             format = "PDF",
                                                             pageCount = renderedList.size,
                                                             lastPage = 0,
+                                                            isFavorite = false,
+                                                            isTrashed = false,
+                                                            author = "Scanned Doc",
+                                                            collection = "Scans",
                                                             cover = thumb,
                                                             metadataLoaded = true
                                                         )
@@ -857,8 +1032,8 @@ class MainActivity : ComponentActivity() {
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
                                     text = docStatus,
-                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
 
@@ -873,7 +1048,7 @@ class MainActivity : ComponentActivity() {
                                     Column(modifier = Modifier.padding(12.dp)) {
                                         Text(
                                             text = "Scanned ${exported.format}: ${exported.title}",
-                                            style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                                            style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold
                                         )
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -944,7 +1119,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 Text(
                                     text = currentBook.title,
-                                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                                    style = MaterialTheme.typography.titleMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
@@ -1031,7 +1206,7 @@ class MainActivity : ComponentActivity() {
 
                                     Text(
                                         text = "Section ${pagerState.currentPage + 1} of ${epubChapters.size} (EPUB)",
-                                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.labelLarge,
                                         modifier = Modifier.align(Alignment.CenterHorizontally)
                                     )
 
@@ -1111,7 +1286,7 @@ class MainActivity : ComponentActivity() {
 
                                         Text(
                                             text = "${((pagerState.currentPage + 1) * 100) / epubChapters.size}%",
-                                            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                                            style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Bold
                                         )
 
@@ -1164,7 +1339,7 @@ class MainActivity : ComponentActivity() {
 
                                 Text(
                                     text = "Page ${pagerState.currentPage + 1} of ${readerPages.size}",
-                                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelLarge,
                                     modifier = Modifier.align(Alignment.CenterHorizontally)
                                 )
 
@@ -1253,7 +1428,7 @@ class MainActivity : ComponentActivity() {
 
                                     Text(
                                         text = "${((pagerState.currentPage + 1) * 100) / readerPages.size}%",
-                                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                                        style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold
                                     )
 
@@ -1273,12 +1448,41 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     } else {
-                        val sectionBooks = when (shelfSection) {
-                            ShelfSection.ALL_BOOKS -> books
-                            ShelfSection.RECENT -> books.filter { it.lastPage > 0 } + books.filter { it.lastPage == 0 }
-                            ShelfSection.BOOKMARKS -> books.filter { it.lastPage > 0 }
+                        val activeBooks = books.filter { !it.isTrashed }
+                        val trashedBooks = books.filter { it.isTrashed }
+
+                        val sectionBaseList = when (section) {
+                            ReadEraSection.READING_NOW -> activeBooks.filter {
+                                it.lastPage > 0 && it.lastPage < (it.pageCount - 1).coerceAtLeast(0)
+                            }
+                            ReadEraSection.BOOKS_AND_DOCS -> activeBooks
+                            ReadEraSection.FAVORITES -> activeBooks.filter { it.isFavorite }
+                            ReadEraSection.TO_READ -> activeBooks.filter { it.lastPage == 0 }
+                            ReadEraSection.HAVE_READ -> activeBooks.filter {
+                                it.pageCount > 0 && it.lastPage >= it.pageCount - 1
+                            }
+                            ReadEraSection.AUTHORS -> {
+                                if (authorFilter == "ALL") activeBooks
+                                else activeBooks.filter { it.author.equals(authorFilter, ignoreCase = true) }
+                            }
+                            ReadEraSection.SERIES -> activeBooks.filter {
+                                it.title.contains("1") || it.title.contains("2") ||
+                                    it.title.contains("3") || it.title.contains("Vol", ignoreCase = true) ||
+                                    it.title.contains("Part", ignoreCase = true)
+                            }.ifEmpty { activeBooks }
+                            ReadEraSection.COLLECTIONS -> {
+                                if (collectionFilter == "ALL") activeBooks
+                                else activeBooks.filter { it.collection.equals(collectionFilter, ignoreCase = true) }
+                            }
+                            ReadEraSection.FORMATS -> {
+                                if (formatFilter == "ALL") activeBooks
+                                else activeBooks.filter { it.format.equals(formatFilter, ignoreCase = true) }
+                            }
+                            ReadEraSection.TRASH -> trashedBooks
+                            ReadEraSection.SETTINGS -> activeBooks
                         }
-                        val filteredBooks = sectionBooks.filter {
+
+                        val filteredBooks = sectionBaseList.filter {
                             it.title.contains(searchQuery, ignoreCase = true)
                         }
 
@@ -1288,7 +1492,7 @@ class MainActivity : ComponentActivity() {
                                     .fillMaxSize()
                                     .padding(horizontal = 14.dp, vertical = 22.dp)
                             ) {
-                                // Top Moon+ Reader style bar: Drawer toggle + Section title + Overflow menu
+                                // ReadEra top bar with custom DocuVerse app icon graphic, Drawer toggle, Section title, Overflow menu
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1306,14 +1510,15 @@ class MainActivity : ComponentActivity() {
                                             Text("Menu", maxLines = 1, softWrap = false)
                                         }
 
-                                        val sectionTitle = when (shelfSection) {
-                                            ShelfSection.ALL_BOOKS -> "All Books"
-                                            ShelfSection.RECENT -> "Recent List"
-                                            ShelfSection.BOOKMARKS -> "Bookmarks"
-                                        }
+                                        ReadEraGraphicIcon(
+                                            kind = "BOOKS",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+
                                         Text(
-                                            text = "$sectionTitle (${books.size})",
-                                            style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
+                                            text = section.label,
+                                            style = MaterialTheme.typography.titleLarge,
                                             fontWeight = FontWeight.Bold,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -1342,14 +1547,28 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             )
                                             DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        if (useDefaultCovers) "Show PDF Covers" else "Set default cover"
-                                                    )
-                                                },
+                                                text = { Text("Scan Folder") },
                                                 onClick = {
                                                     showOverflowMenu = false
-                                                    useDefaultCovers = !useDefaultCovers
+                                                    startFolderScan()
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Doc Scanner") },
+                                                onClick = {
+                                                    showOverflowMenu = false
+                                                    showDocScanner = true
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Open a random book") },
+                                                onClick = {
+                                                    showOverflowMenu = false
+                                                    if (activeBooks.isNotEmpty()) {
+                                                        openBook(activeBooks[Random.nextInt(activeBooks.size)])
+                                                    } else {
+                                                        scanNotice = "No active books to open."
+                                                    }
                                                 }
                                             )
                                             DropdownMenuItem(
@@ -1360,18 +1579,6 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             )
                                             DropdownMenuItem(
-                                                text = { Text("Open a random book") },
-                                                onClick = {
-                                                    showOverflowMenu = false
-                                                    if (books.isNotEmpty()) {
-                                                        val picked = books[Random.nextInt(books.size)]
-                                                        openBook(picked)
-                                                    } else {
-                                                        scanNotice = "Library is empty. Import or scan books first."
-                                                    }
-                                                }
-                                            )
-                                            DropdownMenuItem(
                                                 text = {
                                                     Text(if (selectionMode) "Cancel selection" else "Select all")
                                                 },
@@ -1379,7 +1586,7 @@ class MainActivity : ComponentActivity() {
                                                     showOverflowMenu = false
                                                     if (!selectionMode) {
                                                         selectionMode = true
-                                                        selectedUris = books.map { it.uriString }.toSet()
+                                                        selectedUris = sectionBaseList.map { it.uriString }.toSet()
                                                     } else {
                                                         selectionMode = false
                                                         selectedUris = emptySet()
@@ -1390,30 +1597,56 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                // Quick actions row: Scan Folder + Doc Scanner
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    OutlinedButton(
-                                        onClick = { startFolderScan() },
-                                        enabled = !isScanning,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(
-                                            text = if (isScanning) "Scanning..." else "Scan Folder",
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
+                                // Sub-filter chips when viewing Formats, Authors, Collections, or Settings
+                                if (section == ReadEraSection.FORMATS) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(listOf("ALL", "PDF", "EPUB")) { fmt ->
+                                            OutlinedButton(onClick = { formatFilter = fmt }) {
+                                                Text(if (formatFilter == fmt) "$fmt ✓" else fmt, maxLines = 1, softWrap = false)
+                                            }
+                                        }
                                     }
-                                    Button(
-                                        onClick = { showDocScanner = true },
-                                        enabled = !isScanning,
-                                        modifier = Modifier.weight(1f)
+                                } else if (section == ReadEraSection.AUTHORS) {
+                                    val authorList = listOf("ALL") + activeBooks.map { it.author }.distinct()
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(authorList) { auth ->
+                                            OutlinedButton(onClick = { authorFilter = auth }) {
+                                                Text(if (authorFilter == auth) "$auth ✓" else auth, maxLines = 1, softWrap = false)
+                                            }
+                                        }
+                                    }
+                                } else if (section == ReadEraSection.COLLECTIONS) {
+                                    val colList = listOf("ALL", "General", "Documents", "Ebooks", "Scans")
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(colList) { col ->
+                                            OutlinedButton(onClick = { collectionFilter = col }) {
+                                                Text(if (collectionFilter == col) "$col ✓" else col, maxLines = 1, softWrap = false)
+                                            }
+                                        }
+                                    }
+                                } else if (section == ReadEraSection.SETTINGS) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Card(
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text("Doc Scanner", maxLines = 1, softWrap = false)
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text("Reader & Library Settings", fontWeight = FontWeight.Bold)
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                OutlinedButton(onClick = { isDarkTheme = !isDarkTheme }) {
+                                                    Text(if (isDarkTheme) "Theme: Dark" else "Theme: Light", maxLines = 1, softWrap = false)
+                                                }
+                                                OutlinedButton(onClick = { useDefaultCovers = !useDefaultCovers }) {
+                                                    Text(if (useDefaultCovers) "Default Cover: ON" else "Default Cover: OFF", maxLines = 1, softWrap = false)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
@@ -1426,20 +1659,29 @@ class MainActivity : ComponentActivity() {
                                     ) {
                                         Text(
                                             text = "${selectedUris.size} selected",
-                                            style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                                            style = MaterialTheme.typography.labelLarge,
                                             modifier = Modifier.weight(1f)
                                         )
                                         OutlinedButton(
                                             onClick = {
-                                                val remaining = books.filter { it.uriString !in selectedUris }
-                                                books = remaining
-                                                saveBooks(context, remaining)
+                                                val updated = if (section == ReadEraSection.TRASH) {
+                                                    books.filter { it.uriString !in selectedUris }
+                                                } else {
+                                                    books.map {
+                                                        if (it.uriString in selectedUris) it.copy(isTrashed = true) else it
+                                                    }
+                                                }
+                                                books = updated
+                                                saveBooks(context, updated)
                                                 selectionMode = false
                                                 selectedUris = emptySet()
-                                                scanNotice = "Removed selected books."
                                             }
                                         ) {
-                                            Text("Delete Selected", maxLines = 1, softWrap = false)
+                                            Text(
+                                                text = if (section == ReadEraSection.TRASH) "Delete Forever" else "Move to Trash",
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
                                         }
                                     }
                                 }
@@ -1448,8 +1690,8 @@ class MainActivity : ComponentActivity() {
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
                                         text = scanNotice,
-                                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                                        color = androidx.compose.material3.MaterialTheme.colorScheme.primary
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
 
@@ -1459,7 +1701,7 @@ class MainActivity : ComponentActivity() {
                                     value = searchQuery,
                                     onValueChange = { searchQuery = it },
                                     modifier = Modifier.fillMaxWidth(),
-                                    placeholder = { Text("Search PDFs and EPUBs...", maxLines = 1) },
+                                    placeholder = { Text("Search in ${section.label}...", maxLines = 1) },
                                     singleLine = true,
                                     shape = RoundedCornerShape(10.dp)
                                 )
@@ -1475,15 +1717,11 @@ class MainActivity : ComponentActivity() {
                                             .padding(bottom = 12.dp)
                                     ) {
                                         Column(modifier = Modifier.padding(14.dp)) {
-                                            Text(
-                                                text = "About DocuVerse",
-                                                style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                            Text("DocuVerse (ReadEra Edition)", fontWeight = FontWeight.Bold)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "PDF & EPUB Bookshelf Reader with Folder Scanner, Zoom Controls, Edge Tap Navigation, and Document Scanner (PDF & JPEG).",
-                                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                                                text = "Includes Reading Now, Favorites, To Read, Have Read, Authors, Series, Collections, Formats, Folder Scanner, Trash & Restore, and Document Scanner.",
+                                                style = MaterialTheme.typography.bodySmall
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
                                             OutlinedButton(onClick = { showAboutDialog = false }) {
@@ -1499,12 +1737,14 @@ class MainActivity : ComponentActivity() {
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = if (books.isEmpty()) {
-                                                "Shelf is empty.\nTap Menu -> Import Books, Scan Folder, or Doc Scanner."
+                                            text = if (section == ReadEraSection.TRASH) {
+                                                "Trash is empty."
+                                            } else if (activeBooks.isEmpty()) {
+                                                "No books yet.\nTap Menu -> Folders or Downloads to add PDFs and EPUBs."
                                             } else {
-                                                "No books match this view/filter."
+                                                "No books in '${section.label}'."
                                             },
-                                            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge
+                                            style = MaterialTheme.typography.bodyLarge
                                         )
                                     }
                                 } else if (viewMode == LibraryViewMode.LIST) {
@@ -1516,9 +1756,7 @@ class MainActivity : ComponentActivity() {
                                         items(filteredBooks, key = { it.uriString }) { book ->
                                             val rawProg = if (book.pageCount > 0) {
                                                 (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
-                                            } else {
-                                                0f
-                                            }
+                                            } else 0f
                                             val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
                                             val percent = (progress * 100).toInt()
                                             val isChecked = book.uriString in selectedUris
@@ -1528,12 +1766,8 @@ class MainActivity : ComponentActivity() {
                                                     .fillMaxWidth()
                                                     .clickable {
                                                         if (selectionMode) {
-                                                            selectedUris = if (isChecked) {
-                                                                selectedUris - book.uriString
-                                                            } else {
-                                                                selectedUris + book.uriString
-                                                            }
-                                                        } else {
+                                                            selectedUris = if (isChecked) selectedUris - book.uriString else selectedUris + book.uriString
+                                                        } else if (!book.isTrashed) {
                                                             openBook(book)
                                                         }
                                                     },
@@ -1549,8 +1783,8 @@ class MainActivity : ComponentActivity() {
                                                 ) {
                                                     Column(modifier = Modifier.weight(1f)) {
                                                         Text(
-                                                            text = (if (selectionMode) (if (isChecked) "[✓] " else "[ ] ") else "") + book.title,
-                                                            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
+                                                            text = (if (book.isFavorite) "★ " else "") + book.title,
+                                                            style = MaterialTheme.typography.bodyLarge,
                                                             fontWeight = FontWeight.SemiBold,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
@@ -1558,8 +1792,8 @@ class MainActivity : ComponentActivity() {
                                                         Spacer(modifier = Modifier.height(4.dp))
                                                         Text(
                                                             text = "${book.format} • $percent% • ${book.pageCount}p",
-                                                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                                                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
                                                         Spacer(modifier = Modifier.height(6.dp))
                                                         LinearProgressIndicator(
@@ -1568,6 +1802,34 @@ class MainActivity : ComponentActivity() {
                                                                 .fillMaxWidth()
                                                                 .height(4.dp)
                                                                 .clip(RoundedCornerShape(2.dp))
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    if (book.isTrashed) {
+                                                        Text(
+                                                            text = "Restore",
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.clickable {
+                                                                val updated = books.map {
+                                                                    if (it.uriString == book.uriString) it.copy(isTrashed = false) else it
+                                                                }
+                                                                books = updated
+                                                                saveBooks(context, updated)
+                                                            }
+                                                        )
+                                                    } else {
+                                                        Text(
+                                                            text = if (book.isFavorite) "Fav ✓" else "Fav",
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.clickable {
+                                                                val updated = books.map {
+                                                                    if (it.uriString == book.uriString) it.copy(isFavorite = !it.isFavorite) else it
+                                                                }
+                                                                books = updated
+                                                                saveBooks(context, updated)
+                                                            }
                                                         )
                                                     }
                                                 }
@@ -1586,31 +1848,24 @@ class MainActivity : ComponentActivity() {
                                         items(filteredBooks, key = { it.uriString }) { book ->
                                             val rawProg = if (book.pageCount > 0) {
                                                 (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
-                                            } else {
-                                                0f
-                                            }
+                                            } else 0f
                                             val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
                                             val percent = (progress * 100).toInt()
                                             val isChecked = book.uriString in selectedUris
 
-                                            // Moon+ Reader cover-first card on dark shelf
                                             Card(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .clickable {
                                                         if (selectionMode) {
-                                                            selectedUris = if (isChecked) {
-                                                                selectedUris - book.uriString
-                                                            } else {
-                                                                selectedUris + book.uriString
-                                                            }
-                                                        } else {
+                                                            selectedUris = if (isChecked) selectedUris - book.uriString else selectedUris + book.uriString
+                                                        } else if (!book.isTrashed) {
                                                             openBook(book)
                                                         }
                                                     },
                                                 shape = RoundedCornerShape(6.dp),
                                                 border = if (selectionMode && isChecked) {
-                                                    BorderStroke(2.dp, androidx.compose.material3.MaterialTheme.colorScheme.primary)
+                                                    BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
                                                 } else null,
                                                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
                                             ) {
@@ -1619,7 +1874,7 @@ class MainActivity : ComponentActivity() {
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .aspectRatio(0.70f)
-                                                            .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant),
+                                                            .background(MaterialTheme.colorScheme.surfaceVariant),
                                                         contentAlignment = Alignment.Center
                                                     ) {
                                                         val coverBmp = if (useDefaultCovers) null else book.cover
@@ -1637,13 +1892,13 @@ class MainActivity : ComponentActivity() {
                                                             ) {
                                                                 Text(
                                                                     text = book.format,
-                                                                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                                                                    style = MaterialTheme.typography.titleMedium,
                                                                     fontWeight = FontWeight.Bold
                                                                 )
                                                                 Spacer(modifier = Modifier.height(6.dp))
                                                                 Text(
                                                                     text = book.title,
-                                                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                                                    style = MaterialTheme.typography.bodySmall,
                                                                     maxLines = 3,
                                                                     overflow = TextOverflow.Ellipsis
                                                                 )
@@ -1666,23 +1921,40 @@ class MainActivity : ComponentActivity() {
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         Text(
-                                                            text = if (selectionMode) {
-                                                                if (isChecked) "Selected" else "Tap"
-                                                            } else {
-                                                                "$percent%"
-                                                            },
-                                                            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                                                            text = if (book.isFavorite) "★ $percent%" else "$percent%",
+                                                            style = MaterialTheme.typography.labelSmall,
                                                             maxLines = 1,
-                                                            softWrap = false
+                                                            softWrap = false,
+                                                            modifier = Modifier.clickable {
+                                                                val updated = books.map {
+                                                                    if (it.uriString == book.uriString) it.copy(isFavorite = !it.isFavorite) else it
+                                                                }
+                                                                books = updated
+                                                                saveBooks(context, updated)
+                                                            }
                                                         )
                                                         Text(
                                                             text = book.title,
-                                                            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                                                            style = MaterialTheme.typography.labelSmall,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis,
                                                             modifier = Modifier
                                                                 .weight(1f)
-                                                                .padding(start = 6.dp)
+                                                                .padding(horizontal = 4.dp)
+                                                        )
+                                                        Text(
+                                                            text = if (book.isTrashed) "Rest" else "Bin",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = if (book.isTrashed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                                            maxLines = 1,
+                                                            softWrap = false,
+                                                            modifier = Modifier.clickable {
+                                                                val updated = books.map {
+                                                                    if (it.uriString == book.uriString) it.copy(isTrashed = !it.isTrashed) else it
+                                                                }
+                                                                books = updated
+                                                                saveBooks(context, updated)
+                                                            }
                                                         )
                                                     }
                                                 }
@@ -1692,138 +1964,146 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            // Slide-out Moon+ Reader style navigation drawer
+                            // Slide-out ReadEra style drawer with graphic icons and all categories
                             if (showDrawer) {
                                 BackHandler { showDrawer = false }
                                 Row(modifier = Modifier.fillMaxSize()) {
                                     Surface(
                                         modifier = Modifier
-                                            .fillMaxWidth(0.76f)
+                                            .fillMaxWidth(0.78f)
                                             .fillMaxHeight(),
-                                        color = androidx.compose.material3.MaterialTheme.colorScheme.surface,
-                                        shadowElevation = 12.dp
+                                        color = MaterialTheme.colorScheme.surface,
+                                        shadowElevation = 14.dp
                                     ) {
                                         Column(
                                             modifier = Modifier
                                                 .fillMaxSize()
+                                                .verticalScroll(rememberScrollState())
                                                 .padding(top = 24.dp, bottom = 18.dp)
                                         ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(110.dp)
-                                                    .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
-                                                    .padding(16.dp),
-                                                contentAlignment = Alignment.BottomStart
-                                            ) {
-                                                Column {
-                                                    Text(
-                                                        text = "DocuVerse",
-                                                        style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Text(
-                                                        text = if (isDarkTheme) "Night Shelf" else "Day Shelf",
-                                                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall
-                                                    )
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.height(8.dp))
-
-                                            val drawerItems = listOf(
-                                                "Recent list" to {
-                                                    shelfSection = ShelfSection.RECENT
-                                                    showDrawer = false
-                                                },
-                                                "My Shelf" to {
-                                                    shelfSection = ShelfSection.ALL_BOOKS
-                                                    showDrawer = false
-                                                },
-                                                "My Files" to {
-                                                    showDrawer = false
-                                                    startFolderScan()
-                                                },
-                                                "Doc Scanner" to {
-                                                    showDrawer = false
-                                                    showDocScanner = true
-                                                },
-                                                "Bookmarks" to {
-                                                    shelfSection = ShelfSection.BOOKMARKS
-                                                    showDrawer = false
-                                                }
-                                            )
-
-                                            for (pair in drawerItems) {
-                                                Text(
-                                                    text = pair.first,
-                                                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable { pair.second() }
-                                                        .padding(horizontal = 20.dp, vertical = 14.dp)
-                                                )
-                                                HorizontalDivider()
-                                            }
-
-                                            Spacer(modifier = Modifier.weight(1f))
-
                                             Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(horizontal = 12.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                                             ) {
-                                                OutlinedButton(
-                                                    onClick = {
-                                                        viewMode = when (viewMode) {
-                                                            LibraryViewMode.GRID_3 -> LibraryViewMode.GRID_2
-                                                            LibraryViewMode.GRID_2 -> LibraryViewMode.LIST
-                                                            LibraryViewMode.LIST -> LibraryViewMode.GRID_3
-                                                        }
-                                                    },
-                                                    modifier = Modifier.weight(1f),
-                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                                                ReadEraGraphicIcon(
+                                                    kind = "BOOKS",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(28.dp)
+                                                )
+                                                Text(
+                                                    text = "DocuVerse",
+                                                    style = MaterialTheme.typography.titleLarge,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+
+                                            HorizontalDivider()
+
+                                            @Composable
+                                            fun DrawerNavRow(
+                                                label: String,
+                                                iconKind: String,
+                                                active: Boolean = false,
+                                                onClick: () -> Unit
+                                            ) {
+                                                val rowTint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(
+                                                            if (active) MaterialTheme.colorScheme.surfaceVariant else ComposeColor.Transparent
+                                                        )
+                                                        .clickable { onClick() }
+                                                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                                                 ) {
+                                                    ReadEraGraphicIcon(kind = iconKind, tint = rowTint)
                                                     Text(
-                                                        text = when (viewMode) {
-                                                            LibraryViewMode.GRID_3 -> "3-Col"
-                                                            LibraryViewMode.GRID_2 -> "2-Col"
-                                                            LibraryViewMode.LIST -> "List"
-                                                        },
+                                                        text = label,
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                                         maxLines = 1,
-                                                        softWrap = false
+                                                        overflow = TextOverflow.Ellipsis
                                                     )
                                                 }
+                                            }
 
-                                                OutlinedButton(
-                                                    onClick = {
-                                                        showDrawer = false
-                                                        showAboutDialog = true
-                                                    },
-                                                    modifier = Modifier.weight(1f),
-                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("About", maxLines = 1, softWrap = false)
+                                            DrawerNavRow("Reading Now", "READING_NOW", section == ReadEraSection.READING_NOW) {
+                                                section = ReadEraSection.READING_NOW
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("Books & documents", "BOOKS", section == ReadEraSection.BOOKS_AND_DOCS) {
+                                                section = ReadEraSection.BOOKS_AND_DOCS
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("Favorites", "FAVORITES", section == ReadEraSection.FAVORITES) {
+                                                section = ReadEraSection.FAVORITES
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("To Read", "TO_READ", section == ReadEraSection.TO_READ) {
+                                                section = ReadEraSection.TO_READ
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("Have Read", "HAVE_READ", section == ReadEraSection.HAVE_READ) {
+                                                section = ReadEraSection.HAVE_READ
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("Authors", "AUTHORS", section == ReadEraSection.AUTHORS) {
+                                                section = ReadEraSection.AUTHORS
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("Series", "SERIES", section == ReadEraSection.SERIES) {
+                                                section = ReadEraSection.SERIES
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("Collections", "COLLECTIONS", section == ReadEraSection.COLLECTIONS) {
+                                                section = ReadEraSection.COLLECTIONS
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("Formats", "FORMATS", section == ReadEraSection.FORMATS) {
+                                                section = ReadEraSection.FORMATS
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("Folders", "FOLDERS") {
+                                                showDrawer = false
+                                                startFolderScan()
+                                            }
+                                            DrawerNavRow("Downloads", "DOWNLOADS") {
+                                                showDrawer = false
+                                                addBookLauncher.launch(
+                                                    arrayOf("application/pdf", "application/epub+zip", "*/*")
+                                                )
+                                            }
+                                            DrawerNavRow("Doc Scanner", "BOOKS") {
+                                                showDrawer = false
+                                                showDocScanner = true
+                                            }
+                                            DrawerNavRow("Trash", "TRASH", section == ReadEraSection.TRASH) {
+                                                section = ReadEraSection.TRASH
+                                                showDrawer = false
+                                            }
+
+                                            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+
+                                            DrawerNavRow("Settings", "SETTINGS", section == ReadEraSection.SETTINGS) {
+                                                section = ReadEraSection.SETTINGS
+                                                showDrawer = false
+                                            }
+                                            DrawerNavRow("Send feedback", "FEEDBACK") {
+                                                showDrawer = false
+                                                val mailIntent = Intent(Intent.ACTION_SENDTO).apply {
+                                                    data = Uri.parse("mailto:")
+                                                    putExtra(Intent.EXTRA_SUBJECT, "DocuVerse Reader Feedback")
                                                 }
-
-                                                OutlinedButton(
-                                                    onClick = { isDarkTheme = !isDarkTheme },
-                                                    modifier = Modifier.weight(1.2f),
-                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text(
-                                                        text = if (isDarkTheme) "Day" else "Night",
-                                                        maxLines = 1,
-                                                        softWrap = false
-                                                    )
-                                                }
-
-                                                OutlinedButton(
-                                                    onClick = { finish() },
-                                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("Exit", maxLines = 1, softWrap = false)
+                                                try {
+                                                    context.startActivity(mailIntent)
+                                                } catch (_: Exception) {
+                                                    showAboutDialog = true
                                                 }
                                             }
                                         }
@@ -1833,7 +2113,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxHeight()
-                                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
+                                            .background(ComposeColor.Black.copy(alpha = 0.6f))
                                             .clickable { showDrawer = false }
                                     )
                                 }
@@ -2096,6 +2376,10 @@ class MainActivity : ComponentActivity() {
             obj.put("format", b.format)
             obj.put("pageCount", b.pageCount)
             obj.put("lastPage", b.lastPage)
+            obj.put("isFavorite", b.isFavorite)
+            obj.put("isTrashed", b.isTrashed)
+            obj.put("author", b.author)
+            obj.put("collection", b.collection)
             arr.put(obj)
         }
         prefs.edit().putString("books_json", arr.toString()).apply()
@@ -2109,13 +2393,19 @@ class MainActivity : ComponentActivity() {
             val list = mutableListOf<BookItem>()
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
+                val title = obj.getString("title")
+                val fmt = obj.optString("format", "PDF")
                 list.add(
                     BookItem(
                         uriString = obj.getString("uri"),
-                        title = obj.getString("title"),
-                        format = obj.optString("format", "PDF"),
+                        title = title,
+                        format = fmt,
                         pageCount = obj.getInt("pageCount"),
                         lastPage = obj.optInt("lastPage", 0),
+                        isFavorite = obj.optBoolean("isFavorite", false),
+                        isTrashed = obj.optBoolean("isTrashed", false),
+                        author = obj.optString("author", if (title.contains(" - ")) title.substringBefore(" - ").trim() else "Library"),
+                        collection = obj.optString("collection", if (fmt == "EPUB") "Ebooks" else "Documents"),
                         cover = null,
                         metadataLoaded = false
                     )
