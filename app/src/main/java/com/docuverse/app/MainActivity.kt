@@ -25,6 +25,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -61,11 +62,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -101,6 +102,24 @@ enum class ScanFilterMode(val label: String) {
     DOC_BW("Doc B&W"),
     MAGIC_COLOR("Magic Color"),
     GRAYSCALE("Grayscale")
+}
+
+data class SideCrop(
+    val left: Float = 0f,
+    val top: Float = 0f,
+    val right: Float = 0f,
+    val bottom: Float = 0f
+)
+
+data class EditableScanPage(
+    val rawBitmap: Bitmap,
+    val crop: SideCrop = SideCrop(),
+    val filter: ScanFilterMode = ScanFilterMode.DOC_BW
+) {
+    fun renderEdited(): Bitmap {
+        val cropped = cropSidesBitmap(rawBitmap, crop.left, crop.top, crop.right, crop.bottom)
+        return applyScanFilter(cropped, filter)
+    }
 }
 
 data class BookItem(
@@ -343,69 +362,71 @@ class MainActivity : ComponentActivity() {
                                 "Scan_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                             )
                         }
-                        // Raw source images kept so side trims & filters can be adjusted anytime before adding/saving
-                        var rawSources by remember { mutableStateOf(listOf<Bitmap>()) }
-                        var stagedPages by remember { mutableStateOf(listOf<Bitmap>()) }
+                        var scanPages by remember { mutableStateOf(listOf<EditableScanPage>()) }
                         var selectedIndex by remember { mutableIntStateOf(0) }
-
-                        // Pre-scan side crop fractions (0.0 to 0.35 on each side) & filter mode
-                        var cropLeft by remember { mutableFloatStateOf(0f) }
-                        var cropTop by remember { mutableFloatStateOf(0f) }
-                        var cropRight by remember { mutableFloatStateOf(0f) }
-                        var cropBottom by remember { mutableFloatStateOf(0f) }
-                        var filterMode by remember { mutableStateOf(ScanFilterMode.DOC_BW) }
+                        var defaultFilter by remember { mutableStateOf(ScanFilterMode.DOC_BW) }
 
                         var docStatus by remember { mutableStateOf("") }
                         var isProcessingDoc by remember { mutableStateOf(false) }
                         var lastExported by remember { mutableStateOf<ExportedScanResult?>(null) }
 
-                        fun applyEditToBitmap(source: Bitmap): Bitmap {
-                            val cropped = cropSidesBitmap(source, cropLeft, cropTop, cropRight, cropBottom)
-                            return applyScanFilter(cropped, filterMode)
-                        }
-
                         val cameraSnapLauncher = rememberLauncherForActivityResult(
                             contract = ActivityResultContracts.TakePicturePreview()
                         ) { bmp: Bitmap? ->
                             if (bmp != null) {
-                                val updatedRaw = rawSources + bmp
-                                rawSources = updatedRaw
-                                val edited = applyEditToBitmap(bmp)
-                                stagedPages = stagedPages + edited
-                                selectedIndex = stagedPages.lastIndex
-                                docStatus = "Captured page ${stagedPages.size}. Adjust sides or filter, then Add/Save."
+                                val newPage = EditableScanPage(
+                                    rawBitmap = bmp,
+                                    crop = SideCrop(),
+                                    filter = defaultFilter
+                                )
+                                scanPages = scanPages + newPage
+                                selectedIndex = scanPages.lastIndex
+                                docStatus = "Captured page ${scanPages.size}. Drag Left/Right/Top/Bottom sliders to live-cut."
                             } else {
                                 docStatus = "Camera capture cancelled."
                             }
                         }
 
-                        val multiGalleryLauncher = rememberLauncherForActivityResult(
-                            contract = ActivityResultContracts.OpenMultipleDocuments()
+                        // Opens the phone's visual photo gallery directly
+                        val galleryPickerLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.PickMultipleVisualMedia()
                         ) { uris: List<Uri> ->
                             if (uris.isNotEmpty()) {
                                 isProcessingDoc = true
-                                docStatus = "Loading ${uris.size} photo(s)..."
+                                docStatus = "Loading ${uris.size} photo(s) from gallery..."
                                 Thread {
-                                    val loaded = mutableListOf<Bitmap>()
+                                    val loadedPages = mutableListOf<EditableScanPage>()
                                     for (u in uris) {
                                         val b = decodeBitmapFromUri(context, u)
-                                        if (b != null) loaded.add(b)
+                                        if (b != null) {
+                                            loadedPages.add(
+                                                EditableScanPage(
+                                                    rawBitmap = b,
+                                                    crop = SideCrop(),
+                                                    filter = defaultFilter
+                                                )
+                                            )
+                                        }
                                     }
                                     runOnUiThread {
-                                        if (loaded.isNotEmpty()) {
-                                            val startIdx = stagedPages.size
-                                            rawSources = rawSources + loaded
-                                            val editedList = loaded.map { applyEditToBitmap(it) }
-                                            stagedPages = stagedPages + editedList
-                                            selectedIndex = startIdx.coerceIn(0, stagedPages.lastIndex)
-                                            docStatus = "Loaded ${loaded.size} photo(s). Cut sides or pick filter before saving."
+                                        if (loadedPages.isNotEmpty()) {
+                                            val startIdx = scanPages.size
+                                            scanPages = scanPages + loadedPages
+                                            selectedIndex = startIdx.coerceIn(0, scanPages.lastIndex)
+                                            docStatus = "Added ${loadedPages.size} gallery photo(s). Select a page and live-cut sides."
                                         } else {
-                                            docStatus = "Could not read selected image files."
+                                            docStatus = "Could not load selected gallery photos."
                                         }
                                         isProcessingDoc = false
                                     }
                                 }.start()
                             }
+                        }
+
+                        fun updateSelectedPage(transform: (EditableScanPage) -> EditableScanPage) {
+                            if (scanPages.isEmpty()) return
+                            val idx = selectedIndex.coerceIn(0, scanPages.lastIndex)
+                            scanPages = scanPages.mapIndexed { i, p -> if (i == idx) transform(p) else p }
                         }
 
                         Column(
@@ -445,7 +466,6 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Source actions: Camera + Multi-Photo Phone/Gallery picker
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -458,119 +478,81 @@ class MainActivity : ComponentActivity() {
                                     Text("Camera", maxLines = 1, softWrap = false)
                                 }
                                 OutlinedButton(
-                                    onClick = { multiGalleryLauncher.launch(arrayOf("image/*")) },
+                                    onClick = {
+                                        galleryPickerLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    },
                                     enabled = !isProcessingDoc,
                                     modifier = Modifier.weight(1.3f)
                                 ) {
-                                    Text("Pick Photos", maxLines = 1, softWrap = false)
+                                    Text("Gallery Photos", maxLines = 1, softWrap = false)
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            if (scanPages.isNotEmpty()) {
+                                val safeIdx = selectedIndex.coerceIn(0, scanPages.lastIndex)
+                                val currentPage = scanPages[safeIdx]
+                                val livePreviewBmp = remember(currentPage) { currentPage.renderEdited() }
 
-                            // Pre-scan Filter selector row
-                            Text(
-                                text = "Pre-Scan Filter",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                items(ScanFilterMode.entries) { mode ->
-                                    val selected = filterMode == mode
-                                    OutlinedButton(
-                                        onClick = {
-                                            filterMode = mode
-                                            if (rawSources.isNotEmpty()) {
-                                                stagedPages = rawSources.map { applyEditToBitmap(it) }
-                                            }
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Page selector strip
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(scanPages.indices.toList()) { idx ->
+                                        OutlinedButton(
+                                            onClick = { selectedIndex = idx }
+                                        ) {
+                                            Text(
+                                                text = if (idx == safeIdx) "Page ${idx + 1} ✓" else "Page ${idx + 1}",
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
                                         }
-                                    ) {
-                                        Text(
-                                            text = if (selected) "${mode.label} ✓" else mode.label,
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
                                     }
                                 }
-                            }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                            // Pre-scan Side Cut / Crop controls (adjusts page view before saving)
-                            Text(
-                                text = "Cut Sides: L ${(cropLeft * 100).toInt()}% • R ${(cropRight * 100).toInt()}% • T ${(cropTop * 100).toInt()}% • B ${(cropBottom * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        cropLeft = (cropLeft + 0.05f).coerceAtMost(0.35f)
-                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
-                                    },
-                                    modifier = Modifier.weight(1f)
+                                // Filter buttons for selected page
+                                Text(
+                                    text = "Filter (Page ${safeIdx + 1})",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("Cut L", maxLines = 1, softWrap = false)
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        cropRight = (cropRight + 0.05f).coerceAtMost(0.35f)
-                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Cut R", maxLines = 1, softWrap = false)
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        cropTop = (cropTop + 0.05f).coerceAtMost(0.35f)
-                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Cut Top", maxLines = 1, softWrap = false)
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        cropBottom = (cropBottom + 0.05f).coerceAtMost(0.35f)
-                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Cut Bot", maxLines = 1, softWrap = false)
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        cropLeft = 0f
-                                        cropTop = 0f
-                                        cropRight = 0f
-                                        cropBottom = 0f
-                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
+                                    items(ScanFilterMode.entries) { mode ->
+                                        val isSel = currentPage.filter == mode
+                                        OutlinedButton(
+                                            onClick = {
+                                                defaultFilter = mode
+                                                updateSelectedPage { it.copy(filter = mode) }
+                                            }
+                                        ) {
+                                            Text(
+                                                text = if (isSel) "${mode.label} ✓" else mode.label,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
                                     }
-                                ) {
-                                    Text("Reset", maxLines = 1, softWrap = false)
                                 }
-                            }
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                            // Live preview of selected edited page before saving
-                            if (stagedPages.isNotEmpty()) {
-                                val safeSel = selectedIndex.coerceIn(0, stagedPages.lastIndex)
+                                // Live preview card showing real-time side cutting & filter
                                 Card(
                                     shape = RoundedCornerShape(12.dp),
                                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(240.dp)
+                                        .height(230.dp)
                                 ) {
                                     Column(modifier = Modifier.padding(8.dp)) {
                                         Row(
@@ -579,26 +561,24 @@ class MainActivity : ComponentActivity() {
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "Preview Page ${safeSel + 1} of ${stagedPages.size}",
+                                                text = "Live Cut Preview • Page ${safeIdx + 1}",
                                                 style = MaterialTheme.typography.labelLarge
                                             )
                                             Text(
-                                                text = "Remove Page",
+                                                text = "Delete Page",
                                                 style = MaterialTheme.typography.labelMedium,
                                                 color = MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.clickable {
-                                                    val newRaw = rawSources.filterIndexed { i, _ -> i != safeSel }
-                                                    val newStaged = stagedPages.filterIndexed { i, _ -> i != safeSel }
-                                                    rawSources = newRaw
-                                                    stagedPages = newStaged
+                                                    val nextList = scanPages.filterIndexed { i, _ -> i != safeIdx }
+                                                    scanPages = nextList
                                                     selectedIndex = 0
                                                 }
                                             )
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Image(
-                                            bitmap = stagedPages[safeSel].asImageBitmap(),
-                                            contentDescription = "Edited Preview",
+                                            bitmap = livePreviewBmp.asImageBitmap(),
+                                            contentDescription = "Live Cut Page Preview",
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .fillMaxWidth()
@@ -610,57 +590,116 @@ class MainActivity : ComponentActivity() {
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                // Live sliders to cut & set Left, Right, Top, Bottom sides like Adobe Scan
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    items(stagedPages.indices.toList()) { idx ->
-                                        OutlinedButton(
-                                            onClick = { selectedIndex = idx }
-                                        ) {
-                                            Text(
-                                                text = if (idx == safeSel) "P${idx + 1} ✓" else "P${idx + 1}",
-                                                maxLines = 1,
-                                                softWrap = false
-                                            )
+                                    Text(
+                                        text = "Live Side Cut Controls",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            updateSelectedPage { it.copy(crop = SideCrop()) }
                                         }
+                                    ) {
+                                        Text("Reset Sides", maxLines = 1, softWrap = false)
                                     }
                                 }
+
+                                Text(
+                                    text = "Left: ${(currentPage.crop.left * 100).toInt()}%   •   Right: ${(currentPage.crop.right * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Slider(
+                                        value = currentPage.crop.left,
+                                        onValueChange = { v ->
+                                            val clamped = v.coerceIn(0f, 0.4f)
+                                            updateSelectedPage { it.copy(crop = it.crop.copy(left = clamped)) }
+                                        },
+                                        valueRange = 0f..0.4f,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Slider(
+                                        value = currentPage.crop.right,
+                                        onValueChange = { v ->
+                                            val clamped = v.coerceIn(0f, 0.4f)
+                                            updateSelectedPage { it.copy(crop = it.crop.copy(right = clamped)) }
+                                        },
+                                        valueRange = 0f..0.4f,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                Text(
+                                    text = "Top: ${(currentPage.crop.top * 100).toInt()}%   •   Bottom: ${(currentPage.crop.bottom * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Slider(
+                                        value = currentPage.crop.top,
+                                        onValueChange = { v ->
+                                            val clamped = v.coerceIn(0f, 0.4f)
+                                            updateSelectedPage { it.copy(crop = it.crop.copy(top = clamped)) }
+                                        },
+                                        valueRange = 0f..0.4f,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Slider(
+                                        value = currentPage.crop.bottom,
+                                        onValueChange = { v ->
+                                            val clamped = v.coerceIn(0f, 0.4f)
+                                            updateSelectedPage { it.copy(crop = it.crop.copy(bottom = clamped)) }
+                                        },
+                                        valueRange = 0f..0.4f,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             } else {
+                                Spacer(modifier = Modifier.height(12.dp))
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(160.dp)
+                                        .height(170.dp)
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(MaterialTheme.colorScheme.surfaceVariant),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = "Tap 'Camera' or 'Pick Photos' (select multiple) to edit & scan.",
+                                        text = "Tap 'Gallery Photos' to pick from your phone gallery or 'Camera' to snap a page.",
                                         style = MaterialTheme.typography.bodyMedium,
-                                        modifier = Modifier.padding(14.dp)
+                                        modifier = Modifier.padding(16.dp)
                                     )
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            // Export actions: Save PDF / Save JPEG / Clear
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
                                     onClick = {
-                                        if (stagedPages.isEmpty()) {
-                                            docStatus = "Add at least 1 photo first."
+                                        if (scanPages.isEmpty()) {
+                                            docStatus = "Pick or snap at least 1 page first."
                                         } else {
                                             isProcessingDoc = true
                                             docStatus = "Generating PDF..."
-                                            val pagesCopy = stagedPages.toList()
+                                            val renderedList = scanPages.map { it.renderEdited() }
                                             val cleanName = sanitizeFileName(docTitle)
                                             Thread {
-                                                val savedUri = savePagesAsPdf(context, cleanName, pagesCopy)
+                                                val savedUri = savePagesAsPdf(context, cleanName, renderedList)
                                                 runOnUiThread {
                                                     isProcessingDoc = false
                                                     if (savedUri != null) {
@@ -669,7 +708,7 @@ class MainActivity : ComponentActivity() {
                                                             uriString = savedUri.toString(),
                                                             title = cleanName,
                                                             format = "PDF",
-                                                            pageCount = pagesCopy.size,
+                                                            pageCount = renderedList.size,
                                                             lastPage = 0,
                                                             cover = thumb,
                                                             metadataLoaded = true
@@ -681,7 +720,7 @@ class MainActivity : ComponentActivity() {
                                                             uris = listOf(savedUri),
                                                             bookItem = book
                                                         )
-                                                        docStatus = "PDF ready: $cleanName.pdf (added to Shelf)"
+                                                        docStatus = "Saved PDF: $cleanName.pdf (added to Shelf)"
                                                     } else {
                                                         docStatus = "Could not create PDF."
                                                     }
@@ -689,7 +728,7 @@ class MainActivity : ComponentActivity() {
                                             }.start()
                                         }
                                     },
-                                    enabled = !isProcessingDoc && stagedPages.isNotEmpty(),
+                                    enabled = !isProcessingDoc && scanPages.isNotEmpty(),
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text("Save PDF", maxLines = 1, softWrap = false)
@@ -697,15 +736,15 @@ class MainActivity : ComponentActivity() {
 
                                 Button(
                                     onClick = {
-                                        if (stagedPages.isEmpty()) {
-                                            docStatus = "Add at least 1 photo first."
+                                        if (scanPages.isEmpty()) {
+                                            docStatus = "Pick or snap at least 1 page first."
                                         } else {
                                             isProcessingDoc = true
                                             docStatus = "Saving JPEG(s)..."
-                                            val pagesCopy = stagedPages.toList()
+                                            val renderedList = scanPages.map { it.renderEdited() }
                                             val cleanName = sanitizeFileName(docTitle)
                                             Thread {
-                                                val savedUris = savePagesAsJpegsWithUris(context, cleanName, pagesCopy)
+                                                val savedUris = savePagesAsJpegsWithUris(context, cleanName, renderedList)
                                                 runOnUiThread {
                                                     isProcessingDoc = false
                                                     if (savedUris.isNotEmpty()) {
@@ -723,7 +762,7 @@ class MainActivity : ComponentActivity() {
                                             }.start()
                                         }
                                     },
-                                    enabled = !isProcessingDoc && stagedPages.isNotEmpty(),
+                                    enabled = !isProcessingDoc && scanPages.isNotEmpty(),
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text("Save JPEG", maxLines = 1, softWrap = false)
@@ -731,13 +770,12 @@ class MainActivity : ComponentActivity() {
 
                                 OutlinedButton(
                                     onClick = {
-                                        rawSources = listOf()
-                                        stagedPages = listOf()
+                                        scanPages = listOf()
                                         selectedIndex = 0
                                         lastExported = null
                                         docStatus = "Cleared."
                                     },
-                                    enabled = !isProcessingDoc && (stagedPages.isNotEmpty() || lastExported != null)
+                                    enabled = !isProcessingDoc && (scanPages.isNotEmpty() || lastExported != null)
                                 ) {
                                     Text("Clear", maxLines = 1, softWrap = false)
                                 }
@@ -752,7 +790,6 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            // Post-Scan Adobe Scan style action card
                             val exported = lastExported
                             if (exported != null && exported.uris.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(10.dp))
@@ -773,9 +810,7 @@ class MainActivity : ComponentActivity() {
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Button(
-                                                onClick = {
-                                                    shareExportedScan(context, exported)
-                                                },
+                                                onClick = { shareExportedScan(context, exported) },
                                                 modifier = Modifier.weight(1f)
                                             ) {
                                                 Text("Share", maxLines = 1, softWrap = false)
@@ -1515,72 +1550,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun cropSidesBitmap(
-        src: Bitmap,
-        leftFrac: Float,
-        topFrac: Float,
-        rightFrac: Float,
-        bottomFrac: Float
-    ): Bitmap {
-        val w = src.width
-        val h = src.height
-        if (w <= 2 || h <= 2) return src
-
-        val x0 = (w * leftFrac).toInt().coerceIn(0, w - 2)
-        val y0 = (h * topFrac).toInt().coerceIn(0, h - 2)
-        val x1 = (w * (1f - rightFrac)).toInt().coerceIn(x0 + 1, w)
-        val y1 = (h * (1f - bottomFrac)).toInt().coerceIn(y0 + 1, h)
-        val cropW = (x1 - x0).coerceAtLeast(1)
-        val cropH = (y1 - y0).coerceAtLeast(1)
-        return Bitmap.createBitmap(src, x0, y0, cropW, cropH)
-    }
-
-    private fun applyScanFilter(src: Bitmap, mode: ScanFilterMode): Bitmap {
-        if (mode == ScanFilterMode.ORIGINAL) return src
-        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(out)
-        val cm = ColorMatrix()
-        when (mode) {
-            ScanFilterMode.ORIGINAL -> Unit
-            ScanFilterMode.DOC_BW -> {
-                cm.setSaturation(0f)
-                val contrast = 1.65f
-                val brightness = 16f
-                val bwMatrix = ColorMatrix(
-                    floatArrayOf(
-                        contrast, 0f, 0f, 0f, brightness,
-                        0f, contrast, 0f, 0f, brightness,
-                        0f, 0f, contrast, 0f, brightness,
-                        0f, 0f, 0f, 1f, 0f
-                    )
-                )
-                cm.postConcat(bwMatrix)
-            }
-            ScanFilterMode.MAGIC_COLOR -> {
-                cm.setSaturation(1.35f)
-                val contrast = 1.25f
-                val brightness = 8f
-                val colorMatrix = ColorMatrix(
-                    floatArrayOf(
-                        contrast, 0f, 0f, 0f, brightness,
-                        0f, contrast, 0f, 0f, brightness,
-                        0f, 0f, contrast, 0f, brightness,
-                        0f, 0f, 0f, 1f, 0f
-                    )
-                )
-                cm.postConcat(colorMatrix)
-            }
-            ScanFilterMode.GRAYSCALE -> {
-                cm.setSaturation(0f)
-            }
-        }
-        val paint = Paint().apply {
-            colorFilter = ColorMatrixColorFilter(cm)
-        }
-        canvas.drawBitmap(src, 0f, 0f, paint)
-        return out
-    }
-
     private fun sanitizeFileName(raw: String): String {
         val cleaned = raw.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
         return if (cleaned.isBlank()) "Scanned_Doc" else cleaned
@@ -1913,4 +1882,70 @@ class MainActivity : ComponentActivity() {
         }
         return result
     }
+}
+
+private fun cropSidesBitmap(
+    src: Bitmap,
+    leftFrac: Float,
+    topFrac: Float,
+    rightFrac: Float,
+    bottomFrac: Float
+): Bitmap {
+    val w = src.width
+    val h = src.height
+    if (w <= 2 || h <= 2) return src
+
+    val x0 = (w * leftFrac).toInt().coerceIn(0, w - 2)
+    val y0 = (h * topFrac).toInt().coerceIn(0, h - 2)
+    val x1 = (w * (1f - rightFrac)).toInt().coerceIn(x0 + 1, w)
+    val y1 = (h * (1f - bottomFrac)).toInt().coerceIn(y0 + 1, h)
+    val cropW = (x1 - x0).coerceAtLeast(1)
+    val cropH = (y1 - y0).coerceAtLeast(1)
+    return Bitmap.createBitmap(src, x0, y0, cropW, cropH)
+}
+
+private fun applyScanFilter(src: Bitmap, mode: ScanFilterMode): Bitmap {
+    if (mode == ScanFilterMode.ORIGINAL) return src
+    val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(out)
+    val cm = ColorMatrix()
+    when (mode) {
+        ScanFilterMode.ORIGINAL -> Unit
+        ScanFilterMode.DOC_BW -> {
+            cm.setSaturation(0f)
+            val contrast = 1.65f
+            val brightness = 16f
+            val bwMatrix = ColorMatrix(
+                floatArrayOf(
+                    contrast, 0f, 0f, 0f, brightness,
+                    0f, contrast, 0f, 0f, brightness,
+                    0f, 0f, contrast, 0f, brightness,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+            cm.postConcat(bwMatrix)
+        }
+        ScanFilterMode.MAGIC_COLOR -> {
+            cm.setSaturation(1.35f)
+            val contrast = 1.25f
+            val brightness = 8f
+            val colorMatrix = ColorMatrix(
+                floatArrayOf(
+                    contrast, 0f, 0f, 0f, brightness,
+                    0f, contrast, 0f, 0f, brightness,
+                    0f, 0f, contrast, 0f, brightness,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+            cm.postConcat(colorMatrix)
+        }
+        ScanFilterMode.GRAYSCALE -> {
+            cm.setSaturation(0f)
+        }
+    }
+    val paint = Paint().apply {
+        colorFilter = ColorMatrixColorFilter(cm)
+    }
+    canvas.drawBitmap(src, 0f, 0f, paint)
+    return out
 }
