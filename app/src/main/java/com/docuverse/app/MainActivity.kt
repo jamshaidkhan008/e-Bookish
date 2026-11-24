@@ -361,6 +361,14 @@ private fun ReadEraGraphicIcon(
     }
 }
 
+private fun applyParagraphIndent(text: String, indentLevel: Int): String {
+    if (indentLevel <= 0) return text
+    val prefix = "    ".repeat(indentLevel)
+    return text.split("\n\n").joinToString("\n\n") { para ->
+        if (para.isBlank()) para else prefix + para.trimStart()
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -396,11 +404,12 @@ class MainActivity : ComponentActivity() {
                     var isScanning by remember { mutableStateOf(false) }
                     var showDocScanner by remember { mutableStateOf(false) }
 
-                    // ReadEra EPUB reader customization settings
                     var epubPageTheme by remember { mutableStateOf(EpubPageTheme.OLD_YELLOW) }
                     var epubFontSizeSp by remember { mutableFloatStateOf(19f) }
                     var epubFontStyle by remember { mutableStateOf(EpubFontStyleOption.SERIF) }
                     var epubLineSpacingMult by remember { mutableFloatStateOf(1.45f) }
+                    var epubSideMarginDp by remember { mutableIntStateOf(24) }
+                    var epubParagraphIndentLevel by remember { mutableIntStateOf(1) }
 
                     var activeBook by remember { mutableStateOf<BookItem?>(null) }
                     var readerPages by remember { mutableStateOf(listOf<Bitmap>()) }
@@ -883,60 +892,128 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
 
-                                Text(
-                                    text = "Left: ${(currentPage.crop.left * 100).toInt()}%   •   Right: ${(currentPage.crop.right * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Slider(
-                                        value = currentPage.crop.left,
-                                        onValueChange = { v ->
-                                            val clamped = v.coerceIn(0f, 0.4f)
-                                            updateSelectedPage { it.copy(crop = it.crop.copy(left = clamped)) }
-                                        },
-                                        valueRange = 0f..0.4f,
-                                        modifier = Modifier.weight(1f)
+                                    Text(
+                                        text = "Left: ${(currentPage.crop.left * 100).toInt()}%",
+                                        style = MaterialTheme.typography.labelSmall
                                     )
-                                    Slider(
-                                        value = currentPage.crop.right,
-                                        onValueChange = { v ->
-                                            val clamped = v.coerceIn(0f, 0.4f)
-                                            updateSelectedPage { it.copy(crop = it.crop.copy(right = clamped)) }
-                                        },
-                                        valueRange = 0f..0.4f,
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                val v = (currentPage.crop.left - 0.05f).coerceIn(0f, 0.4f)
+                                                updateSelectedPage { it.copy(crop = it.crop.copy(left = v)) }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("L -", maxLines = 1, softWrap = false)
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                val v = (currentPage.crop.left + 0.05f).coerceIn(0f, 0.4f)
+                                                updateSelectedPage { it.copy(crop = it.crop.copy(left = v)) }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("L +", maxLines = 1, softWrap = false)
+                                        }
+                                    }
                                 }
 
-                                Text(
-                                    text = "Top: ${(currentPage.crop.top * 100).toInt()}%   •   Bottom: ${(currentPage.crop.bottom * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Slider(
-                                        value = currentPage.crop.top,
-                                        onValueChange = { v ->
-                                            val clamped = v.coerceIn(0f, 0.4f)
-                                            updateSelectedPage { it.copy(crop = it.crop.copy(top = clamped)) }
-                                        },
-                                        valueRange = 0f..0.4f,
-                                        modifier = Modifier.weight(1f)
+                                    Text(
+                                        text = "Right: ${(currentPage.crop.right * 100).toInt()}%",
+                                        style = MaterialTheme.typography.labelSmall
                                     )
-                                    Slider(
-                                        value = currentPage.crop.bottom,
-                                        onValueChange = { v ->
-                                            val clamped = v.coerceIn(0f, 0.4f)
-                                            updateSelectedPage { it.copy(crop = it.crop.copy(bottom = clamped)) }
-                                        },
-                                        valueRange = 0f..0.4f,
-                                        modifier = Modifier.weight(1f)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                val v = (currentPage.crop.right - 0.05f).coerceIn(0f, 0.4f)
+                                                updateSelectedPage { it.copy(crop = it.crop.copy(right = v)) }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("R -", maxLines = 1, softWrap = false)
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                val v = (currentPage.crop.right + 0.05f).coerceIn(0f, 0.4f)
+                                                updateSelectedPage { it.copy(crop = it.crop.copy(right = v)) }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("R +", maxLines = 1, softWrap = false)
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Top: ${(currentPage.crop.top * 100).toInt()}%",
+                                        style = MaterialTheme.typography.labelSmall
                                     )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                val v = (currentPage.crop.top - 0.05f).coerceIn(0f, 0.4f)
+                                                updateSelectedPage { it.copy(crop = it.crop.copy(top = v)) }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("T -", maxLines = 1, softWrap = false)
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                val v = (currentPage.crop.top + 0.05f).coerceIn(0f, 0.4f)
+                                                updateSelectedPage { it.copy(crop = it.crop.copy(top = v)) }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("T +", maxLines = 1, softWrap = false)
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Bottom: ${(currentPage.crop.bottom * 100).toInt()}%",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                val v = (currentPage.crop.bottom - 0.05f).coerceIn(0f, 0.4f)
+                                                updateSelectedPage { it.copy(crop = it.crop.copy(bottom = v)) }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("B -", maxLines = 1, softWrap = false)
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                val v = (currentPage.crop.bottom + 0.05f).coerceIn(0f, 0.4f)
+                                                updateSelectedPage { it.copy(crop = it.crop.copy(bottom = v)) }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("B +", maxLines = 1, softWrap = false)
+                                        }
+                                    }
                                 }
                             } else {
                                 Spacer(modifier = Modifier.height(12.dp))
@@ -1137,7 +1214,6 @@ class MainActivity : ComponentActivity() {
                                     .fillMaxSize()
                                     .background(epubPageTheme.bgColor)
                             ) {
-                                // Clean top bar with Shelf, Book Title, and ReadEra Aa style button
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1184,7 +1260,6 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
 
-                                // ReadEra style typography & page background panel
                                 if (showAaPanel) {
                                     Column(
                                         modifier = Modifier
@@ -1193,7 +1268,6 @@ class MainActivity : ComponentActivity() {
                                             .padding(horizontal = 14.dp, vertical = 10.dp),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        // Page backgrounds: Old Yellow, Rusty Gold, Soft Mint, Soft Lilac, Day White, Warm Sepia, Night Slate
                                         Text(
                                             text = "Page Background: ${epubPageTheme.label}",
                                             style = MaterialTheme.typography.labelLarge,
@@ -1228,7 +1302,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
 
-                                        // Font size controls
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1255,7 +1328,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
 
-                                        // Font style options (Serif, Sans, Mono)
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1277,7 +1349,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
 
-                                        // Line spacing / line distance options
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1301,6 +1372,57 @@ class MainActivity : ComponentActivity() {
                                                 ) {
                                                     Text("Wider", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
                                                 }
+                                            }
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Side Margins: ${epubSideMarginDp}dp",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = epubPageTheme.textColor
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                OutlinedButton(
+                                                    onClick = { epubSideMarginDp = (epubSideMarginDp - 6).coerceAtLeast(12) },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Narrow", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { epubSideMarginDp = (epubSideMarginDp + 6).coerceAtMost(48) },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Wide", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                }
+                                            }
+                                        }
+
+                                        val indentLabel = when (epubParagraphIndentLevel) {
+                                            0 -> "Off"
+                                            1 -> "1 Tab"
+                                            else -> "2 Tabs"
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Paragraph Indent: $indentLabel",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = epubPageTheme.textColor
+                                            )
+                                            OutlinedButton(
+                                                onClick = {
+                                                    epubParagraphIndentLevel = (epubParagraphIndentLevel + 1) % 3
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                            ) {
+                                                Text("Cycle Indent", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
                                             }
                                         }
                                     }
@@ -1363,11 +1485,14 @@ class MainActivity : ComponentActivity() {
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .verticalScroll(rememberScrollState())
-                                                    .padding(horizontal = 24.dp, vertical = 14.dp)
+                                                    .padding(horizontal = epubSideMarginDp.dp, vertical = 14.dp)
                                             ) {
                                                 val computedLineSp = (epubFontSizeSp * epubLineSpacingMult).sp
+                                                val formattedChapter = remember(epubChapters[chapIndex], epubParagraphIndentLevel) {
+                                                    applyParagraphIndent(epubChapters[chapIndex], epubParagraphIndentLevel)
+                                                }
                                                 Text(
-                                                    text = epubChapters[chapIndex],
+                                                    text = formattedChapter,
                                                     color = epubPageTheme.textColor,
                                                     fontFamily = epubFontStyle.family,
                                                     fontSize = epubFontSizeSp.sp,
@@ -1376,7 +1501,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
 
-                                        // Left & right invisible tap zones to turn sections cleanly
                                         Box(
                                             modifier = Modifier
                                                 .align(Alignment.CenterStart)
@@ -1406,7 +1530,6 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
 
-                                    // Minimal bottom progress strip
                                     val pct = ((pagerState.currentPage + 1) * 100) / epubChapters.size
                                     Row(
                                         modifier = Modifier
