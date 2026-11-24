@@ -1,14 +1,24 @@
 package com.docuverse.app
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.text.Html
 import androidx.activity.ComponentActivity
@@ -31,8 +41,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -72,6 +84,11 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.zip.ZipInputStream
 
 enum class LibraryViewMode {
@@ -105,6 +122,7 @@ class MainActivity : ComponentActivity() {
                     var searchQuery by remember { mutableStateOf("") }
                     var scanNotice by remember { mutableStateOf("") }
                     var isScanning by remember { mutableStateOf(false) }
+                    var showDocScanner by remember { mutableStateOf(false) }
 
                     var activeBook by remember { mutableStateOf<BookItem?>(null) }
                     var readerPages by remember { mutableStateOf(listOf<Bitmap>()) }
@@ -183,6 +201,12 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
+                    fun addBookToShelf(item: BookItem) {
+                        val updated = listOf(item) + books.filter { it.uriString != item.uriString }
+                        books = updated
+                        saveBooks(context, updated)
+                    }
+
                     val addBookLauncher = rememberLauncherForActivityResult(
                         contract = ActivityResultContracts.OpenMultipleDocuments()
                     ) { uris: List<Uri> ->
@@ -198,7 +222,7 @@ class MainActivity : ComponentActivity() {
                                     val updated = addedItems + books.filter { it.uriString !in existingUris }
                                     books = updated
                                     saveBooks(context, updated)
-                                    scanNotice = "Imported ${addedItems.size} book(s). Thumbnails loading in background..."
+                                    scanNotice = "Imported ${addedItems.size} book(s)."
                                 }
                             }.start()
                         }
@@ -235,7 +259,7 @@ class MainActivity : ComponentActivity() {
                                 books = updated
                                 isScanning = false
                                 scanNotice = if (newBooks.isNotEmpty()) {
-                                    "Added ${newBooks.size} book(s) quickly! Covers & page counts filling in."
+                                    "Added ${newBooks.size} book(s) quickly!"
                                 } else {
                                     "Found ${discovered.size} book(s) (all already in library)."
                                 }
@@ -296,7 +320,290 @@ class MainActivity : ComponentActivity() {
                         }.start()
                     }
 
-                    if (activeBook != null) {
+                    if (showDocScanner) {
+                        BackHandler { showDocScanner = false }
+
+                        var docTitle by remember {
+                            mutableStateOf(
+                                "Scan_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                            )
+                        }
+                        var scannedPages by remember { mutableStateOf(listOf<Bitmap>()) }
+                        var enhanceDoc by remember { mutableStateOf(true) }
+                        var docStatus by remember { mutableStateOf("") }
+                        var isSavingDoc by remember { mutableStateOf(false) }
+
+                        val cameraSnapLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.TakePicturePreview()
+                        ) { bmp: Bitmap? ->
+                            if (bmp != null) {
+                                val processed = if (enhanceDoc) applyDocumentContrast(bmp) else bmp
+                                scannedPages = scannedPages + processed
+                                docStatus = "Captured page ${scannedPages.size}."
+                            } else {
+                                docStatus = "Camera capture cancelled."
+                            }
+                        }
+
+                        val galleryPhotoLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.GetContent()
+                        ) { uri: Uri? ->
+                            if (uri != null) {
+                                Thread {
+                                    val loaded = decodeBitmapFromUri(context, uri)
+                                    runOnUiThread {
+                                        if (loaded != null) {
+                                            val processed = if (enhanceDoc) applyDocumentContrast(loaded) else loaded
+                                            scannedPages = scannedPages + processed
+                                            docStatus = "Added photo page ${scannedPages.size}."
+                                        } else {
+                                            docStatus = "Could not read selected image."
+                                        }
+                                    }
+                                }.start()
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp, vertical = 22.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(onClick = { showDocScanner = false }) {
+                                    Text("Shelf", maxLines = 1, softWrap = false)
+                                }
+                                Text(
+                                    text = "Document Scanner",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            OutlinedTextField(
+                                value = docTitle,
+                                onValueChange = { docTitle = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Document Name") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { cameraSnapLauncher.launch(null) },
+                                    enabled = !isSavingDoc,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Snap Page", maxLines = 1, softWrap = false)
+                                }
+                                OutlinedButton(
+                                    onClick = { galleryPhotoLauncher.launch("image/*") },
+                                    enabled = !isSavingDoc,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Pick Photo", maxLines = 1, softWrap = false)
+                                }
+                                OutlinedButton(
+                                    onClick = { enhanceDoc = !enhanceDoc },
+                                    enabled = !isSavingDoc,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = if (enhanceDoc) "Filter: ON" else "Filter: OFF",
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        if (scannedPages.isEmpty()) {
+                                            docStatus = "Snap or pick at least 1 page first."
+                                        } else {
+                                            isSavingDoc = true
+                                            docStatus = "Creating PDF..."
+                                            val pagesCopy = scannedPages.toList()
+                                            val cleanName = sanitizeFileName(docTitle)
+                                            Thread {
+                                                val savedUri = savePagesAsPdf(context, cleanName, pagesCopy)
+                                                runOnUiThread {
+                                                    isSavingDoc = false
+                                                    if (savedUri != null) {
+                                                        val thumb = renderSinglePage(context, savedUri, 0, 0.5f)
+                                                        addBookToShelf(
+                                                            BookItem(
+                                                                uriString = savedUri.toString(),
+                                                                title = cleanName,
+                                                                format = "PDF",
+                                                                pageCount = pagesCopy.size,
+                                                                lastPage = 0,
+                                                                cover = thumb,
+                                                                metadataLoaded = true
+                                                            )
+                                                        )
+                                                        scanNotice = "Saved PDF '$cleanName.pdf' and added to library."
+                                                        docStatus = "Saved PDF: $cleanName.pdf"
+                                                    } else {
+                                                        docStatus = "Failed to save PDF file."
+                                                    }
+                                                }
+                                            }.start()
+                                        }
+                                    },
+                                    enabled = !isSavingDoc && scannedPages.isNotEmpty(),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Save PDF", maxLines = 1, softWrap = false)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        if (scannedPages.isEmpty()) {
+                                            docStatus = "Snap or pick at least 1 page first."
+                                        } else {
+                                            isSavingDoc = true
+                                            docStatus = "Saving JPEG..."
+                                            val pagesCopy = scannedPages.toList()
+                                            val cleanName = sanitizeFileName(docTitle)
+                                            Thread {
+                                                val savedCount = savePagesAsJpegs(context, cleanName, pagesCopy)
+                                                runOnUiThread {
+                                                    isSavingDoc = false
+                                                    if (savedCount > 0) {
+                                                        scanNotice = "Saved $savedCount JPEG file(s) to Downloads/Documents."
+                                                        docStatus = "Saved $savedCount JPEG file(s)!"
+                                                    } else {
+                                                        docStatus = "Failed to save JPEG file."
+                                                    }
+                                                }
+                                            }.start()
+                                        }
+                                    },
+                                    enabled = !isSavingDoc && scannedPages.isNotEmpty(),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Save JPEG", maxLines = 1, softWrap = false)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        scannedPages = listOf()
+                                        docStatus = "Cleared pages."
+                                    },
+                                    enabled = !isSavingDoc && scannedPages.isNotEmpty()
+                                ) {
+                                    Text("Clear", maxLines = 1, softWrap = false)
+                                }
+                            }
+
+                            if (docStatus.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = docStatus,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Text(
+                                text = "Captured Pages (${scannedPages.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            if (scannedPages.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Tap 'Snap Page' or 'Pick Photo' to scan pages into PDF or JPEG.",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
+                                }
+                            } else {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth()
+                                ) {
+                                    items(scannedPages.indices.toList()) { idx ->
+                                        val pageBmp = scannedPages[idx]
+                                        Card(
+                                            shape = RoundedCornerShape(10.dp),
+                                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .aspectRatio(0.75f)
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp)) {
+                                                Image(
+                                                    bitmap = pageBmp.asImageBitmap(),
+                                                    contentDescription = "Page ${idx + 1}",
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(6.dp)),
+                                                    contentScale = ContentScale.Fit
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "Page ${idx + 1}",
+                                                        style = MaterialTheme.typography.labelMedium
+                                                    )
+                                                    Text(
+                                                        text = "Remove",
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        color = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.clickable {
+                                                            scannedPages = scannedPages.filterIndexed { i, _ -> i != idx }
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if (activeBook != null) {
                         val currentBook = activeBook as BookItem
                         BackHandler {
                             activeBook = null
@@ -441,7 +748,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
 
-                                        // Left tap zone: go to previous EPUB section
                                         Box(
                                             modifier = Modifier
                                                 .align(Alignment.CenterStart)
@@ -456,7 +762,6 @@ class MainActivity : ComponentActivity() {
                                                 }
                                         )
 
-                                        // Right tap zone: go to next EPUB section
                                         Box(
                                             modifier = Modifier
                                                 .align(Alignment.CenterEnd)
@@ -585,7 +890,6 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
 
-                                    // Left tap zone: go to previous PDF page
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.CenterStart)
@@ -600,7 +904,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                     )
 
-                                    // Right tap zone: go to next PDF page
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.CenterEnd)
@@ -706,7 +1009,7 @@ class MainActivity : ComponentActivity() {
                                 OutlinedButton(
                                     onClick = { startFolderScan() },
                                     enabled = !isScanning,
-                                    modifier = Modifier.weight(1.4f)
+                                    modifier = Modifier.weight(1f)
                                 ) {
                                     Text(
                                         text = if (isScanning) "Scanning..." else "Scan Folder",
@@ -715,12 +1018,12 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                                 OutlinedButton(
-                                    onClick = { scanFolderLauncher.launch(null) },
+                                    onClick = { showDocScanner = true },
                                     enabled = !isScanning,
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text(
-                                        text = "Pick Folder",
+                                        text = "Doc Scanner",
                                         maxLines = 1,
                                         softWrap = false
                                     )
@@ -794,7 +1097,7 @@ class MainActivity : ComponentActivity() {
                                     contentAlignment = Alignment.Center
                                 ) {
                                     val emptyText = if (books.isEmpty()) {
-                                        "Your shelf is empty.\nTap 'Scan Folder' (select Downloads/Documents) or '+ Add Book'."
+                                        "Your shelf is empty.\nTap 'Doc Scanner', 'Scan Folder', or '+ Add Book'."
                                     } else {
                                         "No matching books found."
                                     }
@@ -979,6 +1282,137 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun sanitizeFileName(raw: String): String {
+        val cleaned = raw.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        return if (cleaned.isBlank()) "Scanned_Doc" else cleaned
+    }
+
+    private fun applyDocumentContrast(src: Bitmap): Bitmap {
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val contrast = 1.25f
+        val brightness = 10f
+        val cm = ColorMatrix(
+            floatArrayOf(
+                contrast, 0f, 0f, 0f, brightness,
+                0f, contrast, 0f, 0f, brightness,
+                0f, 0f, contrast, 0f, brightness,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        val paint = Paint().apply {
+            colorFilter = ColorMatrixColorFilter(cm)
+        }
+        canvas.drawBitmap(src, 0f, 0f, paint)
+        return out
+    }
+
+    private fun decodeBitmapFromUri(context: Context, uri: Uri): Bitmap? {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val raw = BitmapFactory.decodeStream(stream) ?: return null
+                val maxSide = 1600
+                val w = raw.width
+                val h = raw.height
+                if (w <= maxSide && h <= maxSide) {
+                    raw
+                } else if (w >= h) {
+                    val newH = ((h.toFloat() / w.toFloat()) * maxSide).toInt().coerceAtLeast(1)
+                    Bitmap.createScaledBitmap(raw, maxSide, newH, true)
+                } else {
+                    val newW = ((w.toFloat() / h.toFloat()) * maxSide).toInt().coerceAtLeast(1)
+                    Bitmap.createScaledBitmap(raw, newW, maxSide, true)
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun savePagesAsPdf(context: Context, baseName: String, pages: List<Bitmap>): Uri? {
+        val pdfDoc = PdfDocument()
+        try {
+            for (i in pages.indices) {
+                val bmp = pages[i]
+                val pageW = bmp.width.coerceAtLeast(1)
+                val pageH = bmp.height.coerceAtLeast(1)
+                val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create()
+                val page = pdfDoc.startPage(pageInfo)
+                page.canvas.drawColor(Color.WHITE)
+                page.canvas.drawBitmap(bmp, 0f, 0f, null)
+                pdfDoc.finishPage(page)
+            }
+
+            val fileName = "$baseName.pdf"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: return null
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    pdfDoc.writeTo(out)
+                }
+                return uri
+            } else {
+                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!dir.exists()) dir.mkdirs()
+                val outFile = File(dir, fileName)
+                FileOutputStream(outFile).use { out ->
+                    pdfDoc.writeTo(out)
+                }
+                return Uri.fromFile(outFile)
+            }
+        } catch (_: Exception) {
+            return null
+        } finally {
+            try {
+                pdfDoc.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun savePagesAsJpegs(context: Context, baseName: String, pages: List<Bitmap>): Int {
+        var saved = 0
+        for (i in pages.indices) {
+            val bmp = pages[i]
+            val suffix = if (pages.size == 1) "" else "_p${i + 1}"
+            val fileName = "$baseName$suffix.jpg"
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DocuVerse")
+                    }
+                    val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    if (uri != null) {
+                        context.contentResolver.openOutputStream(uri)?.use { out ->
+                            bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                        }
+                        saved++
+                    }
+                } else {
+                    val dir = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                        "DocuVerse"
+                    )
+                    if (!dir.exists()) dir.mkdirs()
+                    val outFile = File(dir, fileName)
+                    FileOutputStream(outFile).use { out ->
+                        bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                    }
+                    saved++
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return saved
     }
 
     private fun collectBooksFromTreeFast(
