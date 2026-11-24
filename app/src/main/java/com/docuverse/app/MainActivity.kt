@@ -1206,228 +1206,15 @@ class MainActivity : ComponentActivity() {
                         }
 
                         var zoomScale by remember(currentBook.uriString) { mutableStateOf(1f) }
+                        var showReaderBars by remember { mutableStateOf(false) }
                         var showAaPanel by remember { mutableStateOf(false) }
 
                         if (currentBook.format == "EPUB") {
-                            Column(
+                            Box(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .background(epubPageTheme.bgColor)
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(epubPageTheme.chromeBg)
-                                        .padding(horizontal = 12.dp, vertical = 14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            activeBook = null
-                                            epubChapters = listOf()
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = "Shelf",
-                                            color = epubPageTheme.textColor,
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
-                                    }
-
-                                    Text(
-                                        text = currentBook.title,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = epubPageTheme.textColor,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    OutlinedButton(
-                                        onClick = { showAaPanel = !showAaPanel },
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = "Aa",
-                                            color = epubPageTheme.textColor,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
-                                    }
-                                }
-
-                                if (showAaPanel) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(epubPageTheme.chromeBg)
-                                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text(
-                                            text = "Page Background: ${epubPageTheme.label}",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = epubPageTheme.textColor
-                                        )
-                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            items(EpubPageTheme.entries) { themeOpt ->
-                                                val isCurr = epubPageTheme == themeOpt
-                                                Column(
-                                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                                    modifier = Modifier.clickable { epubPageTheme = themeOpt }
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(34.dp)
-                                                            .clip(CircleShape)
-                                                            .background(themeOpt.bgColor)
-                                                            .border(
-                                                                width = if (isCurr) 3.dp else 1.dp,
-                                                                color = if (isCurr) MaterialTheme.colorScheme.primary else epubPageTheme.textColor.copy(alpha = 0.4f),
-                                                                shape = CircleShape
-                                                            )
-                                                    )
-                                                    Spacer(modifier = Modifier.height(2.dp))
-                                                    Text(
-                                                        text = themeOpt.label,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = epubPageTheme.textColor,
-                                                        maxLines = 1
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Font Size: ${epubFontSizeSp.toInt()}sp",
-                                                style = MaterialTheme.typography.labelLarge,
-                                                color = epubPageTheme.textColor
-                                            )
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                OutlinedButton(
-                                                    onClick = { epubFontSizeSp = (epubFontSizeSp - 2f).coerceAtLeast(14f) },
-                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text("A-", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
-                                                }
-                                                OutlinedButton(
-                                                    onClick = { epubFontSizeSp = (epubFontSizeSp + 2f).coerceAtMost(28f) },
-                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text("A+", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
-                                                }
-                                            }
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            for (fOpt in EpubFontStyleOption.entries) {
-                                                OutlinedButton(
-                                                    onClick = { epubFontStyle = fOpt },
-                                                    modifier = Modifier.weight(1f),
-                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text(
-                                                        text = if (epubFontStyle == fOpt) "${fOpt.label} ✓" else fOpt.label,
-                                                        color = epubPageTheme.textColor,
-                                                        fontFamily = fOpt.family,
-                                                        maxLines = 1,
-                                                        softWrap = false
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Line Spacing: ${String.format(Locale.US, "%.2f", epubLineSpacingMult)}x",
-                                                style = MaterialTheme.typography.labelLarge,
-                                                color = epubPageTheme.textColor
-                                            )
-                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                OutlinedButton(
-                                                    onClick = { epubLineSpacingMult = (epubLineSpacingMult - 0.15f).coerceAtLeast(1.1f) },
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text("Tighter", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
-                                                }
-                                                OutlinedButton(
-                                                    onClick = { epubLineSpacingMult = (epubLineSpacingMult + 0.15f).coerceAtMost(2.0f) },
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text("Wider", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
-                                                }
-                                            }
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Side Margins: ${epubSideMarginDp}dp",
-                                                style = MaterialTheme.typography.labelLarge,
-                                                color = epubPageTheme.textColor
-                                            )
-                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                OutlinedButton(
-                                                    onClick = { epubSideMarginDp = (epubSideMarginDp - 6).coerceAtLeast(12) },
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text("Narrow", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
-                                                }
-                                                OutlinedButton(
-                                                    onClick = { epubSideMarginDp = (epubSideMarginDp + 6).coerceAtMost(48) },
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text("Wide", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
-                                                }
-                                            }
-                                        }
-
-                                        val indentLabel = when (epubParagraphIndentLevel) {
-                                            0 -> "Off"
-                                            1 -> "1 Tab"
-                                            else -> "2 Tabs"
-                                        }
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Paragraph Indent: $indentLabel",
-                                                style = MaterialTheme.typography.labelLarge,
-                                                color = epubPageTheme.textColor
-                                            )
-                                            OutlinedButton(
-                                                onClick = {
-                                                    epubParagraphIndentLevel = (epubParagraphIndentLevel + 1) % 3
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                            ) {
-                                                Text("Cycle Indent", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
-                                            }
-                                        }
-                                    }
-                                }
-
                                 if (isLoadingReader) {
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
@@ -1472,83 +1259,361 @@ class MainActivity : ComponentActivity() {
                                         saveBooks(context, updatedBooks)
                                     }
 
+                                    // Full-screen chapter canvas
+                                    HorizontalPager(
+                                        state = pagerState,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) { chapIndex ->
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .verticalScroll(rememberScrollState())
+                                                .padding(horizontal = epubSideMarginDp.dp, vertical = 22.dp)
+                                        ) {
+                                            val computedLineSp = (epubFontSizeSp * epubLineSpacingMult).sp
+                                            val formattedChapter = remember(epubChapters[chapIndex], epubParagraphIndentLevel) {
+                                                applyParagraphIndent(epubChapters[chapIndex], epubParagraphIndentLevel)
+                                            }
+                                            Text(
+                                                text = formattedChapter,
+                                                color = epubPageTheme.textColor,
+                                                fontFamily = epubFontStyle.family,
+                                                fontSize = epubFontSizeSp.sp,
+                                                lineHeight = computedLineSp
+                                            )
+                                        }
+                                    }
+
+                                    // Left edge tap zone: previous section
                                     Box(
                                         modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxWidth()
-                                    ) {
-                                        HorizontalPager(
-                                            state = pagerState,
-                                            modifier = Modifier.fillMaxSize()
-                                        ) { chapIndex ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .verticalScroll(rememberScrollState())
-                                                    .padding(horizontal = epubSideMarginDp.dp, vertical = 14.dp)
-                                            ) {
-                                                val computedLineSp = (epubFontSizeSp * epubLineSpacingMult).sp
-                                                val formattedChapter = remember(epubChapters[chapIndex], epubParagraphIndentLevel) {
-                                                    applyParagraphIndent(epubChapters[chapIndex], epubParagraphIndentLevel)
+                                            .align(Alignment.CenterStart)
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(0.18f)
+                                            .clickable {
+                                                if (pagerState.currentPage > 0) {
+                                                    scope.launch {
+                                                        pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                    }
                                                 }
-                                                Text(
-                                                    text = formattedChapter,
-                                                    color = epubPageTheme.textColor,
-                                                    fontFamily = epubFontStyle.family,
-                                                    fontSize = epubFontSizeSp.sp,
-                                                    lineHeight = computedLineSp
-                                                )
+                                            }
+                                    )
+
+                                    // Center tap zone: toggles top & bottom reader bars like ReadEra
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.Center)
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(0.64f)
+                                            .clickable {
+                                                showReaderBars = !showReaderBars
+                                                if (!showReaderBars) showAaPanel = false
+                                            }
+                                    )
+
+                                    // Right edge tap zone: next section
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.CenterEnd)
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(0.18f)
+                                            .clickable {
+                                                if (pagerState.currentPage < epubChapters.size - 1) {
+                                                    scope.launch {
+                                                        pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                    }
+                                                }
+                                            }
+                                    )
+
+                                    // Top & Bottom ReadEra overlay bars shown when tapping the page
+                                    if (showReaderBars) {
+                                        Column(
+                                            modifier = Modifier
+                                                .align(Alignment.TopCenter)
+                                                .fillMaxWidth()
+                                                .background(epubPageTheme.chromeBg)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        activeBook = null
+                                                        epubChapters = listOf()
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "← Shelf",
+                                                        color = epubPageTheme.textColor,
+                                                        maxLines = 1,
+                                                        softWrap = false
+                                                    )
+                                                }
+
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = currentBook.title,
+                                                        style = MaterialTheme.typography.titleMedium,
+                                                        color = epubPageTheme.textColor,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = "Section ${pagerState.currentPage + 1} of ${epubChapters.size}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = epubPageTheme.textColor.copy(alpha = 0.78f),
+                                                        maxLines = 1
+                                                    )
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = { showAaPanel = !showAaPanel },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Aa",
+                                                        color = epubPageTheme.textColor,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        softWrap = false
+                                                    )
+                                                }
+                                            }
+
+                                            if (showAaPanel) {
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(epubPageTheme.chromeBg)
+                                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Page Background: ${epubPageTheme.label}",
+                                                        style = MaterialTheme.typography.labelLarge,
+                                                        color = epubPageTheme.textColor
+                                                    )
+                                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                        items(EpubPageTheme.entries) { themeOpt ->
+                                                            val isCurr = epubPageTheme == themeOpt
+                                                            Column(
+                                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                                modifier = Modifier.clickable { epubPageTheme = themeOpt }
+                                                            ) {
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .size(34.dp)
+                                                                        .clip(CircleShape)
+                                                                        .background(themeOpt.bgColor)
+                                                                        .border(
+                                                                            width = if (isCurr) 3.dp else 1.dp,
+                                                                            color = if (isCurr) MaterialTheme.colorScheme.primary else epubPageTheme.textColor.copy(alpha = 0.4f),
+                                                                            shape = CircleShape
+                                                                        )
+                                                                )
+                                                                Spacer(modifier = Modifier.height(2.dp))
+                                                                Text(
+                                                                    text = themeOpt.label,
+                                                                    style = MaterialTheme.typography.labelSmall,
+                                                                    color = epubPageTheme.textColor,
+                                                                    maxLines = 1
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = "Font Size: ${epubFontSizeSp.toInt()}sp",
+                                                            style = MaterialTheme.typography.labelLarge,
+                                                            color = epubPageTheme.textColor
+                                                        )
+                                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                            OutlinedButton(
+                                                                onClick = { epubFontSizeSp = (epubFontSizeSp - 2f).coerceAtLeast(14f) },
+                                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Text("A-", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                            }
+                                                            OutlinedButton(
+                                                                onClick = { epubFontSizeSp = (epubFontSizeSp + 2f).coerceAtMost(28f) },
+                                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Text("A+", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        for (fOpt in EpubFontStyleOption.entries) {
+                                                            OutlinedButton(
+                                                                onClick = { epubFontStyle = fOpt },
+                                                                modifier = Modifier.weight(1f),
+                                                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Text(
+                                                                    text = if (epubFontStyle == fOpt) "${fOpt.label} ✓" else fOpt.label,
+                                                                    color = epubPageTheme.textColor,
+                                                                    fontFamily = fOpt.family,
+                                                                    maxLines = 1,
+                                                                    softWrap = false
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = "Line Spacing: ${String.format(Locale.US, "%.2f", epubLineSpacingMult)}x",
+                                                            style = MaterialTheme.typography.labelLarge,
+                                                            color = epubPageTheme.textColor
+                                                        )
+                                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            OutlinedButton(
+                                                                onClick = { epubLineSpacingMult = (epubLineSpacingMult - 0.15f).coerceAtLeast(1.1f) },
+                                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Text("Tighter", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                            }
+                                                            OutlinedButton(
+                                                                onClick = { epubLineSpacingMult = (epubLineSpacingMult + 0.15f).coerceAtMost(2.0f) },
+                                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Text("Wider", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = "Side Margins: ${epubSideMarginDp}dp",
+                                                            style = MaterialTheme.typography.labelLarge,
+                                                            color = epubPageTheme.textColor
+                                                        )
+                                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            OutlinedButton(
+                                                                onClick = { epubSideMarginDp = (epubSideMarginDp - 6).coerceAtLeast(12) },
+                                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Text("Narrow", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                            }
+                                                            OutlinedButton(
+                                                                onClick = { epubSideMarginDp = (epubSideMarginDp + 6).coerceAtMost(48) },
+                                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Text("Wide", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                            }
+                                                        }
+                                                    }
+
+                                                    val indentLabel = when (epubParagraphIndentLevel) {
+                                                        0 -> "Off"
+                                                        1 -> "1 Tab"
+                                                        else -> "2 Tabs"
+                                                    }
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = "Paragraph Indent: $indentLabel",
+                                                            style = MaterialTheme.typography.labelLarge,
+                                                            color = epubPageTheme.textColor
+                                                        )
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                epubParagraphIndentLevel = (epubParagraphIndentLevel + 1) % 3
+                                                            },
+                                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Text("Cycle Indent", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
 
-                                        Box(
+                                        // Bottom ReadEra-style progress & jump bar when bars are visible
+                                        val pct = ((pagerState.currentPage + 1) * 100) / epubChapters.size
+                                        val progFrac = ((pagerState.currentPage + 1).toFloat() / epubChapters.size.toFloat()).coerceIn(0f, 1f)
+                                        Column(
                                             modifier = Modifier
-                                                .align(Alignment.CenterStart)
-                                                .fillMaxHeight()
-                                                .fillMaxWidth(0.22f)
-                                                .clickable {
-                                                    if (pagerState.currentPage > 0) {
-                                                        scope.launch {
-                                                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                .align(Alignment.BottomCenter)
+                                                .fillMaxWidth()
+                                                .background(epubPageTheme.chromeBg)
+                                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                                        ) {
+                                            LinearProgressIndicator(
+                                                progress = progFrac,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(4.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        if (pagerState.currentPage > 0) {
+                                                            scope.launch {
+                                                                pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                            }
                                                         }
-                                                    }
+                                                    },
+                                                    enabled = pagerState.currentPage > 0,
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("Prev Sec", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
                                                 }
-                                        )
 
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.CenterEnd)
-                                                .fillMaxHeight()
-                                                .fillMaxWidth(0.22f)
-                                                .clickable {
-                                                    if (pagerState.currentPage < epubChapters.size - 1) {
-                                                        scope.launch {
-                                                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                Text(
+                                                    text = "${pagerState.currentPage + 1} of ${epubChapters.size} ($pct%)",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = epubPageTheme.textColor
+                                                )
+
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        if (pagerState.currentPage < epubChapters.size - 1) {
+                                                            scope.launch {
+                                                                pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                            }
                                                         }
-                                                    }
+                                                    },
+                                                    enabled = pagerState.currentPage < epubChapters.size - 1,
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("Next Sec", color = epubPageTheme.textColor, maxLines = 1, softWrap = false)
                                                 }
-                                        )
-                                    }
-
-                                    val pct = ((pagerState.currentPage + 1) * 100) / epubChapters.size
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(epubPageTheme.chromeBg)
-                                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Sec ${pagerState.currentPage + 1}/${epubChapters.size}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = epubPageTheme.textColor.copy(alpha = 0.8f)
-                                        )
-                                        Text(
-                                            text = "$pct%",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = epubPageTheme.textColor.copy(alpha = 0.8f)
-                                        )
+                                            }
+                                        }
                                     }
                                 }
                             }
