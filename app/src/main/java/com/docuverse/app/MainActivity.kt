@@ -1,17 +1,14 @@
 package com.docuverse.app
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
-import android.provider.MediaStore
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.text.Html
 import androidx.activity.ComponentActivity
@@ -70,7 +67,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -132,7 +128,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    fun importBookUri(uri: Uri): Boolean {
+                    fun buildBookFromUri(uri: Uri, knownName: String? = null): BookItem? {
                         try {
                             contentResolver.takePersistableUriPermission(
                                 uri,
@@ -141,17 +137,22 @@ class MainActivity : ComponentActivity() {
                         } catch (_: Exception) {
                         }
 
-                        val rawName = getRawFileName(context, uri)
-                        val isEpub = rawName.lowercase().endsWith(".epub") ||
-                            (context.contentResolver.getType(uri)?.contains("epub") == true)
+                        val rawName = knownName ?: getRawFileName(context, uri)
+                        val lower = rawName.lowercase()
+                        val mime = context.contentResolver.getType(uri)?.lowercase() ?: ""
+                        val isEpub = lower.endsWith(".epub") || mime.contains("epub")
+                        val isPdf = lower.endsWith(".pdf") || mime.contains("pdf")
+
+                        if (!isEpub && !isPdf) return null
+
                         val title = rawName
                             .removeSuffix(".pdf").removeSuffix(".PDF")
                             .removeSuffix(".epub").removeSuffix(".EPUB")
 
-                        if (isEpub) {
+                        return if (isEpub) {
                             val chapters = extractEpubChapters(context, uri)
                             val count = if (chapters.isNotEmpty()) chapters.size else 1
-                            val newBook = BookItem(
+                            BookItem(
                                 uriString = uri.toString(),
                                 title = title,
                                 format = "EPUB",
@@ -159,33 +160,19 @@ class MainActivity : ComponentActivity() {
                                 lastPage = 0,
                                 cover = null
                             )
-                            runOnUiThread {
-                                val updated = listOf(newBook) + books.filter { it.uriString != newBook.uriString }
-                                books = updated
-                                saveBooks(context, updated)
-                            }
-                            return true
                         } else {
                             val count = getPdfPageCount(context, uri)
+                            if (count <= 0) return null
                             val thumb = renderSinglePage(context, uri, 0, 0.7f)
-                            if (count > 0) {
-                                val newBook = BookItem(
-                                    uriString = uri.toString(),
-                                    title = title,
-                                    format = "PDF",
-                                    pageCount = count,
-                                    lastPage = 0,
-                                    cover = thumb
-                                )
-                                runOnUiThread {
-                                    val updated = listOf(newBook) + books.filter { it.uriString != newBook.uriString }
-                                    books = updated
-                                    saveBooks(context, updated)
-                                }
-                                return true
-                            }
+                            BookItem(
+                                uriString = uri.toString(),
+                                title = title,
+                                format = "PDF",
+                                pageCount = count,
+                                lastPage = 0,
+                                cover = thumb
+                            )
                         }
-                        return false
                     }
 
                     val addBookLauncher = rememberLauncherForActivityResult(
@@ -193,81 +180,88 @@ class MainActivity : ComponentActivity() {
                     ) { uris: List<Uri> ->
                         if (uris.isNotEmpty()) {
                             Thread {
-                                var imported = 0
+                                val addedItems = mutableListOf<BookItem>()
                                 for (u in uris) {
-                                    if (importBookUri(u)) imported++
+                                    val item = buildBookFromUri(u)
+                                    if (item != null) {
+                                        addedItems.add(item)
+                                    }
                                 }
                                 runOnUiThread {
-                                    scanNotice = "Imported $imported of ${uris.size} selected file(s)."
+                                    val existingUris = addedItems.map { it.uriString }.toSet()
+                                    val updated = addedItems + books.filter { it.uriString !in existingUris }
+                                    books = updated
+                                    saveBooks(context, updated)
+                                    scanNotice = "Imported ${addedItems.size} book(s) into library."
                                 }
                             }.start()
                         }
                     }
 
-                    fun runPdfScanNow() {
+                    fun scanTreeUri(treeUri: Uri) {
                         isScanning = true
-                        scanNotice = "Scanning device for PDFs..."
+                        scanNotice = "Scanning folder and subfolders..."
                         Thread {
-                            val foundUris = queryMediaStorePdfs(context)
-                            var addedCount = 0
-                            val currentList = books.toMutableList()
-                            for (u in foundUris) {
-                                val uriStr = u.toString()
-                                val alreadyExists = currentList.any { it.uriString == uriStr }
-                                if (!alreadyExists) {
-                                    val title = getRawFileName(context, u)
-                                        .removeSuffix(".pdf").removeSuffix(".PDF")
-                                    val count = getPdfPageCount(context, u)
-                                    if (count > 0) {
-                                        val thumb = renderSinglePage(context, u, 0, 0.7f)
-                                        currentList.add(
-                                            0,
-                                            BookItem(
-                                                uriString = uriStr,
-                                                title = title,
-                                                format = "PDF",
-                                                pageCount = count,
-                                                lastPage = 0,
-                                                cover = thumb
-                                            )
-                                        )
-                                        addedCount++
+                            val discovered = collectBooksFromTree(context, treeUri)
+                            val newBooks = mutableListOf<BookItem>()
+                            val currentUris = books.map { it.uriString }.toMutableSet()
+
+                            for (pair in discovered) {
+                                val docUri = pair.first
+                                val docName = pair.second
+                                val uriStr = docUri.toString()
+                                if (uriStr !in currentUris) {
+                                    val item = buildBookFromUri(docUri, docName)
+                                    if (item != null) {
+                                        newBooks.add(item)
+                                        currentUris.add(uriStr)
                                     }
                                 }
                             }
+
                             runOnUiThread {
-                                books = currentList
-                                saveBooks(context, currentList)
+                                val updated = newBooks + books
+                                books = updated
+                                saveBooks(context, updated)
                                 isScanning = false
-                                scanNotice = if (addedCount > 0) {
-                                    "Added $addedCount new PDF(s). Tap '+ Add Book' to pick more."
-                                } else if (foundUris.isEmpty()) {
-                                    "0 PDFs indexed by MediaStore. Tap '+ Add Book' to select PDFs directly."
+                                scanNotice = if (newBooks.isNotEmpty()) {
+                                    "Added ${newBooks.size} new book(s) from folder!"
                                 } else {
-                                    "All ${foundUris.size} scanned PDF(s) already in library."
+                                    "Found ${discovered.size} book(s) in folder (all already in library)."
                                 }
                             }
                         }.start()
                     }
 
-                    val permissionLauncher = rememberLauncherForActivityResult(
-                        contract = ActivityResultContracts.RequestMultiplePermissions()
-                    ) { _ ->
-                        runPdfScanNow()
+                    val scanFolderLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.OpenDocumentTree()
+                    ) { treeUri: Uri? ->
+                        if (treeUri != null) {
+                            try {
+                                contentResolver.takePersistableUriPermission(
+                                    treeUri,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                )
+                            } catch (_: Exception) {
+                            }
+                            saveSavedFolderUri(context, treeUri.toString())
+                            scanTreeUri(treeUri)
+                        }
                     }
 
-                    fun startScanWithPermissionCheck() {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            runPdfScanNow()
-                        } else {
-                            val readPerm = Manifest.permission.READ_EXTERNAL_STORAGE
-                            val granted = ContextCompat.checkSelfPermission(context, readPerm) == PackageManager.PERMISSION_GRANTED
-                            if (granted) {
-                                runPdfScanNow()
-                            } else {
-                                permissionLauncher.launch(arrayOf(readPerm))
+                    fun startFolderScan() {
+                        val savedTree = loadSavedFolderUri(context)
+                        if (savedTree != null) {
+                            val uri = Uri.parse(savedTree)
+                            val hasPersisted = contentResolver.persistedUriPermissions.any {
+                                it.uri == uri && it.isReadPermission
+                            }
+                            if (hasPersisted) {
+                                scanTreeUri(uri)
+                                return
                             }
                         }
+                        scanFolderLauncher.launch(null)
                     }
 
                     fun openBook(book: BookItem) {
@@ -632,12 +626,23 @@ class MainActivity : ComponentActivity() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 OutlinedButton(
-                                    onClick = { startScanWithPermissionCheck() },
+                                    onClick = { startFolderScan() },
                                     enabled = !isScanning,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.weight(1.4f)
                                 ) {
                                     Text(
-                                        text = if (isScanning) "Scanning Device PDFs..." else "Scan Device for PDFs",
+                                        text = if (isScanning) "Scanning..." else "Scan Folder",
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = { scanFolderLauncher.launch(null) },
+                                    enabled = !isScanning,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "Pick Folder",
                                         maxLines = 1,
                                         softWrap = false
                                     )
@@ -711,7 +716,7 @@ class MainActivity : ComponentActivity() {
                                     contentAlignment = Alignment.Center
                                 ) {
                                     val emptyText = if (books.isEmpty()) {
-                                        "Your shelf is empty.\nTap 'Scan Device for PDFs' or '+ Add Book' to import books."
+                                        "Your shelf is empty.\nTap 'Scan Folder' (select Downloads/Documents) or '+ Add Book'."
                                     } else {
                                         "No matching books found."
                                     }
@@ -898,23 +903,59 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun queryMediaStorePdfs(context: Context): List<Uri> {
-        val result = mutableListOf<Uri>()
-        try {
-            val collection = MediaStore.Files.getContentUri("external")
-            val projection = arrayOf(MediaStore.Files.FileColumns._ID)
-            val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} = ? OR LOWER(${MediaStore.Files.FileColumns.DISPLAY_NAME}) LIKE ?"
-            val selectionArgs = arrayOf("application/pdf", "%.pdf")
-            context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
-                val idCol = cursor.getColumnIndex(MediaStore.Files.FileColumns._ID)
-                while (cursor.moveToNext() && idCol >= 0) {
-                    val id = cursor.getLong(idCol)
-                    result.add(Uri.withAppendedPath(collection, id.toString()))
+    private fun collectBooksFromTree(context: Context, treeUri: Uri): List<Pair<Uri, String>> {
+        val found = mutableListOf<Pair<Uri, String>>()
+        val queue = ArrayDeque<String>()
+        val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
+        queue.add(rootDocId)
+
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+
+        while (queue.isNotEmpty()) {
+            val parentDocId = queue.removeFirst()
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+            try {
+                context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                    val idIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+
+                    while (cursor.moveToNext()) {
+                        val docId = if (idIdx >= 0) cursor.getString(idIdx) else continue
+                        val name = if (nameIdx >= 0) cursor.getString(nameIdx) ?: "" else ""
+                        val mime = if (mimeIdx >= 0) cursor.getString(mimeIdx) ?: "" else ""
+
+                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                            queue.add(docId)
+                        } else {
+                            val lower = name.lowercase()
+                            if (lower.endsWith(".pdf") || lower.endsWith(".epub") ||
+                                mime == "application/pdf" || mime.contains("epub")
+                            ) {
+                                val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                                found.add(Pair(docUri, name))
+                            }
+                        }
+                    }
                 }
+            } catch (_: Exception) {
             }
-        } catch (_: Exception) {
         }
-        return result
+        return found
+    }
+
+    private fun saveSavedFolderUri(context: Context, uriString: String) {
+        val prefs = context.getSharedPreferences("docuverse_library", Context.MODE_PRIVATE)
+        prefs.edit().putString("scan_tree_uri", uriString).apply()
+    }
+
+    private fun loadSavedFolderUri(context: Context): String? {
+        val prefs = context.getSharedPreferences("docuverse_library", Context.MODE_PRIVATE)
+        return prefs.getString("scan_tree_uri", null)
     }
 
     @Suppress("DEPRECATION")
