@@ -27,6 +27,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -58,13 +59,17 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -92,9 +97,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipInputStream
+import kotlin.random.Random
 
 enum class LibraryViewMode {
-    GRID_2, GRID_3, LIST
+    GRID_3, GRID_2, LIST
+}
+
+enum class ShelfSection {
+    ALL_BOOKS, RECENT, BOOKMARKS
 }
 
 enum class ScanFilterMode(val label: String) {
@@ -139,20 +149,57 @@ data class ExportedScanResult(
     val bookItem: BookItem? = null
 )
 
+private val MoonDarkScheme = darkColorScheme(
+    primary = androidx.compose.ui.graphics.Color(0xFFD7A86E),
+    onPrimary = androidx.compose.ui.graphics.Color(0xFF1A140C),
+    background = androidx.compose.ui.graphics.Color(0xFF1A1918),
+    onBackground = androidx.compose.ui.graphics.Color(0xFFEDE8E0),
+    surface = androidx.compose.ui.graphics.Color(0xFF282522),
+    onSurface = androidx.compose.ui.graphics.Color(0xFFEDE8E0),
+    surfaceVariant = androidx.compose.ui.graphics.Color(0xFF36312C),
+    onSurfaceVariant = androidx.compose.ui.graphics.Color(0xFFC7BFB3),
+    error = androidx.compose.ui.graphics.Color(0xFFFF6B6B)
+)
+
+private val MoonDayScheme = lightColorScheme(
+    primary = androidx.compose.ui.graphics.Color(0xFF6B4F2A),
+    onPrimary = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+    background = androidx.compose.ui.graphics.Color(0xFFF3EFE6),
+    onBackground = androidx.compose.ui.graphics.Color(0xFF1E1B18),
+    surface = androidx.compose.ui.graphics.Color(0xFFFFFCF7),
+    onSurface = androidx.compose.ui.graphics.Color(0xFF1E1B18),
+    surfaceVariant = androidx.compose.ui.graphics.Color(0xFFE5DEC9),
+    onSurfaceVariant = androidx.compose.ui.graphics.Color(0xFF4D463D),
+    error = androidx.compose.ui.graphics.Color(0xFFB3261E)
+)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
+            var isDarkTheme by remember { mutableStateOf(true) }
+
+            androidx.compose.material3.MaterialTheme(
+                colorScheme = if (isDarkTheme) MoonDarkScheme else MoonDayScheme
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.background
                 ) {
                     val context = LocalContext.current
                     val scope = rememberCoroutineScope()
 
                     var books by remember { mutableStateOf(loadBooks(context)) }
-                    var viewMode by remember { mutableStateOf(LibraryViewMode.GRID_2) }
+                    var viewMode by remember { mutableStateOf(LibraryViewMode.GRID_3) }
+                    var shelfSection by remember { mutableStateOf(ShelfSection.ALL_BOOKS) }
+                    var useDefaultCovers by remember { mutableStateOf(false) }
+                    var showDrawer by remember { mutableStateOf(false) }
+                    var showOverflowMenu by remember { mutableStateOf(false) }
+                    var showAboutDialog by remember { mutableStateOf(false) }
+
+                    var selectionMode by remember { mutableStateOf(false) }
+                    var selectedUris by remember { mutableStateOf(setOf<String>()) }
+
                     var searchQuery by remember { mutableStateOf("") }
                     var scanNotice by remember { mutableStateOf("") }
                     var isScanning by remember { mutableStateOf(false) }
@@ -162,6 +209,39 @@ class MainActivity : ComponentActivity() {
                     var readerPages by remember { mutableStateOf(listOf<Bitmap>()) }
                     var epubChapters by remember { mutableStateOf(listOf<String>()) }
                     var isLoadingReader by remember { mutableStateOf(false) }
+
+                    fun rebuildAllCovers() {
+                        scanNotice = "Rebuilding book covers..."
+                        Thread {
+                            val working = books.toMutableList()
+                            for (i in working.indices) {
+                                val b = working[i]
+                                if (b.format == "PDF") {
+                                    val uri = Uri.parse(b.uriString)
+                                    val count = getPdfPageCount(context, uri)
+                                    val thumb = renderSinglePage(context, uri, 0, 0.5f)
+                                    working[i] = b.copy(
+                                        pageCount = if (count > 0) count else b.pageCount.coerceAtLeast(1),
+                                        cover = thumb,
+                                        metadataLoaded = true
+                                    )
+                                } else {
+                                    val chapters = extractEpubChapters(context, Uri.parse(b.uriString))
+                                    working[i] = b.copy(
+                                        pageCount = if (chapters.isNotEmpty()) chapters.size else b.pageCount.coerceAtLeast(1),
+                                        metadataLoaded = true
+                                    )
+                                }
+                            }
+                            val finalList = working.toList()
+                            saveBooks(context, finalList)
+                            runOnUiThread {
+                                books = finalList
+                                useDefaultCovers = false
+                                scanNotice = "Rebuilt book covers."
+                            }
+                        }.start()
+                    }
 
                     LaunchedEffect(books.size) {
                         val pending = books.filter { !it.metadataLoaded }
@@ -333,6 +413,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     fun openBook(book: BookItem) {
+                        showDrawer = false
                         activeBook = book
                         isLoadingReader = true
                         readerPages = listOf()
@@ -387,7 +468,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // Opens the phone's visual photo gallery directly
                         val galleryPickerLauncher = rememberLauncherForActivityResult(
                             contract = ActivityResultContracts.PickMultipleVisualMedia()
                         ) { uris: List<Uri> ->
@@ -445,7 +525,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 Text(
                                     text = "DocuVerse Scan Studio",
-                                    style = MaterialTheme.typography.headlineSmall,
+                                    style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -497,15 +577,12 @@ class MainActivity : ComponentActivity() {
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                // Page selector strip
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     items(scanPages.indices.toList()) { idx ->
-                                        OutlinedButton(
-                                            onClick = { selectedIndex = idx }
-                                        ) {
+                                        OutlinedButton(onClick = { selectedIndex = idx }) {
                                             Text(
                                                 text = if (idx == safeIdx) "Page ${idx + 1} ✓" else "Page ${idx + 1}",
                                                 maxLines = 1,
@@ -517,10 +594,9 @@ class MainActivity : ComponentActivity() {
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                // Filter buttons for selected page
                                 Text(
                                     text = "Filter (Page ${safeIdx + 1})",
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 LazyRow(
@@ -546,7 +622,6 @@ class MainActivity : ComponentActivity() {
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                // Live preview card showing real-time side cutting & filter
                                 Card(
                                     shape = RoundedCornerShape(12.dp),
                                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
@@ -562,12 +637,12 @@ class MainActivity : ComponentActivity() {
                                         ) {
                                             Text(
                                                 text = "Live Cut Preview • Page ${safeIdx + 1}",
-                                                style = MaterialTheme.typography.labelLarge
+                                                style = androidx.compose.material3.MaterialTheme.typography.labelLarge
                                             )
                                             Text(
                                                 text = "Delete Page",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MaterialTheme.colorScheme.error,
+                                                style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+                                                color = androidx.compose.material3.MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.clickable {
                                                     val nextList = scanPages.filterIndexed { i, _ -> i != safeIdx }
                                                     scanPages = nextList
@@ -590,7 +665,6 @@ class MainActivity : ComponentActivity() {
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                // Live sliders to cut & set Left, Right, Top, Bottom sides like Adobe Scan
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -598,13 +672,11 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     Text(
                                         text = "Live Side Cut Controls",
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     OutlinedButton(
-                                        onClick = {
-                                            updateSelectedPage { it.copy(crop = SideCrop()) }
-                                        }
+                                        onClick = { updateSelectedPage { it.copy(crop = SideCrop()) } }
                                     ) {
                                         Text("Reset Sides", maxLines = 1, softWrap = false)
                                     }
@@ -612,7 +684,7 @@ class MainActivity : ComponentActivity() {
 
                                 Text(
                                     text = "Left: ${(currentPage.crop.left * 100).toInt()}%   •   Right: ${(currentPage.crop.right * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelSmall
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -640,7 +712,7 @@ class MainActivity : ComponentActivity() {
 
                                 Text(
                                     text = "Top: ${(currentPage.crop.top * 100).toInt()}%   •   Bottom: ${(currentPage.crop.bottom * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelSmall
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -672,12 +744,12 @@ class MainActivity : ComponentActivity() {
                                         .fillMaxWidth()
                                         .height(170.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                        .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = "Tap 'Gallery Photos' to pick from your phone gallery or 'Camera' to snap a page.",
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
                                         modifier = Modifier.padding(16.dp)
                                     )
                                 }
@@ -785,8 +857,8 @@ class MainActivity : ComponentActivity() {
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
                                     text = docStatus,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary
                                 )
                             }
 
@@ -801,7 +873,7 @@ class MainActivity : ComponentActivity() {
                                     Column(modifier = Modifier.padding(12.dp)) {
                                         Text(
                                             text = "Scanned ${exported.format}: ${exported.title}",
-                                            style = MaterialTheme.typography.titleMedium,
+                                            style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold
                                         )
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -872,7 +944,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 Text(
                                     text = currentBook.title,
-                                    style = MaterialTheme.typography.titleMedium,
+                                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
@@ -959,7 +1031,7 @@ class MainActivity : ComponentActivity() {
 
                                     Text(
                                         text = "Section ${pagerState.currentPage + 1} of ${epubChapters.size} (EPUB)",
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
                                         modifier = Modifier.align(Alignment.CenterHorizontally)
                                     )
 
@@ -1039,7 +1111,7 @@ class MainActivity : ComponentActivity() {
 
                                         Text(
                                             text = "${((pagerState.currentPage + 1) * 100) / epubChapters.size}%",
-                                            style = MaterialTheme.typography.bodyMedium,
+                                            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Bold
                                         )
 
@@ -1092,7 +1164,7 @@ class MainActivity : ComponentActivity() {
 
                                 Text(
                                     text = "Page ${pagerState.currentPage + 1} of ${readerPages.size}",
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
                                     modifier = Modifier.align(Alignment.CenterHorizontally)
                                 )
 
@@ -1181,7 +1253,7 @@ class MainActivity : ComponentActivity() {
 
                                     Text(
                                         text = "${((pagerState.currentPage + 1) * 100) / readerPages.size}%",
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold
                                     )
 
@@ -1201,320 +1273,569 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     } else {
-                        val filteredBooks = books.filter {
+                        val sectionBooks = when (shelfSection) {
+                            ShelfSection.ALL_BOOKS -> books
+                            ShelfSection.RECENT -> books.filter { it.lastPage > 0 } + books.filter { it.lastPage == 0 }
+                            ShelfSection.BOOKMARKS -> books.filter { it.lastPage > 0 }
+                        }
+                        val filteredBooks = sectionBooks.filter {
                             it.title.contains(searchQuery, ignoreCase = true)
                         }
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp, vertical = 22.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 14.dp, vertical = 22.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "DocuVerse Shelf",
-                                        style = MaterialTheme.typography.headlineSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${books.size} book(s) in library",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(onClick = {
-                                    addBookLauncher.launch(
-                                        arrayOf("application/pdf", "application/epub+zip", "*/*")
-                                    )
-                                }) {
-                                    Text("+ Add Book", maxLines = 1, softWrap = false)
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedButton(
-                                    onClick = { startFolderScan() },
-                                    enabled = !isScanning,
-                                    modifier = Modifier.weight(1f)
+                                // Top Moon+ Reader style bar: Drawer toggle + Section title + Overflow menu
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = if (isScanning) "Scanning..." else "Scan Folder",
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                                OutlinedButton(
-                                    onClick = { showDocScanner = true },
-                                    enabled = !isScanning,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = "Doc Scanner",
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedButton(
-                                    onClick = { viewMode = LibraryViewMode.GRID_2 },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = if (viewMode == LibraryViewMode.GRID_2) "2-Grid ✓" else "2-Grid",
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                                OutlinedButton(
-                                    onClick = { viewMode = LibraryViewMode.GRID_3 },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = if (viewMode == LibraryViewMode.GRID_3) "3-Grid ✓" else "3-Grid",
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                                OutlinedButton(
-                                    onClick = { viewMode = LibraryViewMode.LIST },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = if (viewMode == LibraryViewMode.LIST) "List ✓" else "List",
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                            }
-
-                            if (scanNotice.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = scanNotice,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            OutlinedTextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("Search PDFs and EPUBs...", maxLines = 1) },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            if (filteredBooks.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    val emptyText = if (books.isEmpty()) {
-                                        "Your shelf is empty.\nTap 'Doc Scanner', 'Scan Folder', or '+ Add Book'."
-                                    } else {
-                                        "No matching books found."
-                                    }
-                                    Text(
-                                        text = emptyText,
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
-                                }
-                            } else if (viewMode == LibraryViewMode.LIST) {
-                                LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                                    contentPadding = PaddingValues(bottom = 24.dp),
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    items(filteredBooks, key = { it.uriString }) { book ->
-                                        val rawProg = if (book.pageCount > 0) {
-                                            (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
-                                        } else {
-                                            0f
-                                        }
-                                        val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
-                                        val percent = (progress * 100).toInt()
-                                        val unitLabel = if (book.format == "EPUB") "sec" else "pages"
-
-                                        Card(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { openBook(book) },
-                                            shape = RoundedCornerShape(10.dp),
-                                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { showDrawer = !showDrawer },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                         ) {
-                                            Row(
+                                            Text("Menu", maxLines = 1, softWrap = false)
+                                        }
+
+                                        val sectionTitle = when (shelfSection) {
+                                            ShelfSection.ALL_BOOKS -> "All Books"
+                                            ShelfSection.RECENT -> "Recent List"
+                                            ShelfSection.BOOKMARKS -> "Bookmarks"
+                                        }
+                                        Text(
+                                            text = "$sectionTitle (${books.size})",
+                                            style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Box {
+                                        OutlinedButton(
+                                            onClick = { showOverflowMenu = true },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text("⋮", maxLines = 1, softWrap = false)
+                                        }
+
+                                        DropdownMenu(
+                                            expanded = showOverflowMenu,
+                                            onDismissRequest = { showOverflowMenu = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("Import Books") },
+                                                onClick = {
+                                                    showOverflowMenu = false
+                                                    addBookLauncher.launch(
+                                                        arrayOf("application/pdf", "application/epub+zip", "*/*")
+                                                    )
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        if (useDefaultCovers) "Show PDF Covers" else "Set default cover"
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showOverflowMenu = false
+                                                    useDefaultCovers = !useDefaultCovers
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Rebuild book covers") },
+                                                onClick = {
+                                                    showOverflowMenu = false
+                                                    rebuildAllCovers()
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Open a random book") },
+                                                onClick = {
+                                                    showOverflowMenu = false
+                                                    if (books.isNotEmpty()) {
+                                                        val picked = books[Random.nextInt(books.size)]
+                                                        openBook(picked)
+                                                    } else {
+                                                        scanNotice = "Library is empty. Import or scan books first."
+                                                    }
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(if (selectionMode) "Cancel selection" else "Select all")
+                                                },
+                                                onClick = {
+                                                    showOverflowMenu = false
+                                                    if (!selectionMode) {
+                                                        selectionMode = true
+                                                        selectedUris = books.map { it.uriString }.toSet()
+                                                    } else {
+                                                        selectionMode = false
+                                                        selectedUris = emptySet()
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Quick actions row: Scan Folder + Doc Scanner
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { startFolderScan() },
+                                        enabled = !isScanning,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = if (isScanning) "Scanning..." else "Scan Folder",
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                    Button(
+                                        onClick = { showDocScanner = true },
+                                        enabled = !isScanning,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Doc Scanner", maxLines = 1, softWrap = false)
+                                    }
+                                }
+
+                                if (selectionMode) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "${selectedUris.size} selected",
+                                            style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        OutlinedButton(
+                                            onClick = {
+                                                val remaining = books.filter { it.uriString !in selectedUris }
+                                                books = remaining
+                                                saveBooks(context, remaining)
+                                                selectionMode = false
+                                                selectedUris = emptySet()
+                                                scanNotice = "Removed selected books."
+                                            }
+                                        ) {
+                                            Text("Delete Selected", maxLines = 1, softWrap = false)
+                                        }
+                                    }
+                                }
+
+                                if (scanNotice.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = scanNotice,
+                                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                        color = androidx.compose.material3.MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = { Text("Search PDFs and EPUBs...", maxLines = 1) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                if (showAboutDialog) {
+                                    Card(
+                                        shape = RoundedCornerShape(12.dp),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 12.dp)
+                                    ) {
+                                        Column(modifier = Modifier.padding(14.dp)) {
+                                            Text(
+                                                text = "About DocuVerse",
+                                                style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "PDF & EPUB Bookshelf Reader with Folder Scanner, Zoom Controls, Edge Tap Navigation, and Document Scanner (PDF & JPEG).",
+                                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            OutlinedButton(onClick = { showAboutDialog = false }) {
+                                                Text("Close", maxLines = 1, softWrap = false)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (filteredBooks.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (books.isEmpty()) {
+                                                "Shelf is empty.\nTap Menu -> Import Books, Scan Folder, or Doc Scanner."
+                                            } else {
+                                                "No books match this view/filter."
+                                            },
+                                            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge
+                                        )
+                                    }
+                                } else if (viewMode == LibraryViewMode.LIST) {
+                                    LazyColumn(
+                                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                                        contentPadding = PaddingValues(bottom = 28.dp),
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        items(filteredBooks, key = { it.uriString }) { book ->
+                                            val rawProg = if (book.pageCount > 0) {
+                                                (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
+                                            } else {
+                                                0f
+                                            }
+                                            val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
+                                            val percent = (progress * 100).toInt()
+                                            val isChecked = book.uriString in selectedUris
+
+                                            Card(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(12.dp),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
+                                                    .clickable {
+                                                        if (selectionMode) {
+                                                            selectedUris = if (isChecked) {
+                                                                selectedUris - book.uriString
+                                                            } else {
+                                                                selectedUris + book.uriString
+                                                            }
+                                                        } else {
+                                                            openBook(book)
+                                                        }
+                                                    },
+                                                shape = RoundedCornerShape(10.dp),
+                                                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
                                             ) {
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = "[${book.format}] ${book.title}",
-                                                        style = MaterialTheme.typography.bodyLarge,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Text(
-                                                        text = "$percent% read • ${book.pageCount} $unitLabel",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(12.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = (if (selectionMode) (if (isChecked) "[✓] " else "[ ] ") else "") + book.title,
+                                                            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Spacer(modifier = Modifier.height(4.dp))
+                                                        Text(
+                                                            text = "${book.format} • $percent% • ${book.pageCount}p",
+                                                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                        Spacer(modifier = Modifier.height(6.dp))
+                                                        LinearProgressIndicator(
+                                                            progress = progress,
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(4.dp)
+                                                                .clip(RoundedCornerShape(2.dp))
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    val cols = if (viewMode == LibraryViewMode.GRID_2) 2 else 3
+                                    LazyVerticalGrid(
+                                        columns = GridCells.Fixed(cols),
+                                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        contentPadding = PaddingValues(bottom = 28.dp),
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        items(filteredBooks, key = { it.uriString }) { book ->
+                                            val rawProg = if (book.pageCount > 0) {
+                                                (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
+                                            } else {
+                                                0f
+                                            }
+                                            val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
+                                            val percent = (progress * 100).toInt()
+                                            val isChecked = book.uriString in selectedUris
+
+                                            // Moon+ Reader cover-first card on dark shelf
+                                            Card(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        if (selectionMode) {
+                                                            selectedUris = if (isChecked) {
+                                                                selectedUris - book.uriString
+                                                            } else {
+                                                                selectedUris + book.uriString
+                                                            }
+                                                        } else {
+                                                            openBook(book)
+                                                        }
+                                                    },
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = if (selectionMode && isChecked) {
+                                                    BorderStroke(2.dp, androidx.compose.material3.MaterialTheme.colorScheme.primary)
+                                                } else null,
+                                                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                                            ) {
+                                                Column {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .aspectRatio(0.70f)
+                                                            .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        val coverBmp = if (useDefaultCovers) null else book.cover
+                                                        if (coverBmp != null) {
+                                                            Image(
+                                                                bitmap = coverBmp.asImageBitmap(),
+                                                                contentDescription = book.title,
+                                                                modifier = Modifier.fillMaxSize(),
+                                                                contentScale = ContentScale.Crop
+                                                            )
+                                                        } else {
+                                                            Column(
+                                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                                modifier = Modifier.padding(8.dp)
+                                                            ) {
+                                                                Text(
+                                                                    text = book.format,
+                                                                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                                                                    fontWeight = FontWeight.Bold
+                                                                )
+                                                                Spacer(modifier = Modifier.height(6.dp))
+                                                                Text(
+                                                                    text = book.title,
+                                                                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                                                    maxLines = 3,
+                                                                    overflow = TextOverflow.Ellipsis
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+
                                                     LinearProgressIndicator(
                                                         progress = progress,
                                                         modifier = Modifier
                                                             .fillMaxWidth()
-                                                            .height(4.dp)
-                                                            .clip(RoundedCornerShape(2.dp))
+                                                            .height(3.dp)
                                                     )
-                                                }
-                                                Spacer(modifier = Modifier.width(12.dp))
-                                                Text(
-                                                    text = "Remove",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = MaterialTheme.colorScheme.error,
-                                                    maxLines = 1,
-                                                    softWrap = false,
-                                                    modifier = Modifier.clickable {
-                                                        val updated = books.filter { it.uriString != book.uriString }
-                                                        books = updated
-                                                        saveBooks(context, updated)
+
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = if (selectionMode) {
+                                                                if (isChecked) "Selected" else "Tap"
+                                                            } else {
+                                                                "$percent%"
+                                                            },
+                                                            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                                                            maxLines = 1,
+                                                            softWrap = false
+                                                        )
+                                                        Text(
+                                                            text = book.title,
+                                                            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .padding(start = 6.dp)
+                                                        )
                                                     }
-                                                )
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            } else {
-                                val cols = if (viewMode == LibraryViewMode.GRID_3) 3 else 2
-                                LazyVerticalGrid(
-                                    columns = GridCells.Fixed(cols),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    contentPadding = PaddingValues(bottom = 24.dp),
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    items(filteredBooks, key = { it.uriString }) { book ->
-                                        val rawProg = if (book.pageCount > 0) {
-                                            (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
-                                        } else {
-                                            0f
-                                        }
-                                        val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
-                                        val percent = (progress * 100).toInt()
+                            }
 
-                                        Card(
+                            // Slide-out Moon+ Reader style navigation drawer
+                            if (showDrawer) {
+                                BackHandler { showDrawer = false }
+                                Row(modifier = Modifier.fillMaxSize()) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.76f)
+                                            .fillMaxHeight(),
+                                        color = androidx.compose.material3.MaterialTheme.colorScheme.surface,
+                                        shadowElevation = 12.dp
+                                    ) {
+                                        Column(
                                             modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { openBook(book) },
-                                            shape = RoundedCornerShape(12.dp),
-                                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                                                .fillMaxSize()
+                                                .padding(top = 24.dp, bottom = 18.dp)
                                         ) {
-                                            Column(modifier = Modifier.padding(8.dp)) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .aspectRatio(0.72f)
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    val coverBmp = book.cover
-                                                    if (coverBmp != null) {
-                                                        Image(
-                                                            bitmap = coverBmp.asImageBitmap(),
-                                                            contentDescription = book.title,
-                                                            modifier = Modifier.fillMaxSize(),
-                                                            contentScale = ContentScale.Crop
-                                                        )
-                                                    } else {
-                                                        Text(
-                                                            text = book.format,
-                                                            style = MaterialTheme.typography.titleMedium,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                    }
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(110.dp)
+                                                    .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
+                                                    .padding(16.dp),
+                                                contentAlignment = Alignment.BottomStart
+                                            ) {
+                                                Column {
+                                                    Text(
+                                                        text = "DocuVerse",
+                                                        style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    Text(
+                                                        text = if (isDarkTheme) "Night Shelf" else "Day Shelf",
+                                                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                                                    )
                                                 }
+                                            }
 
-                                                Spacer(modifier = Modifier.height(6.dp))
+                                            Spacer(modifier = Modifier.height(8.dp))
 
+                                            val drawerItems = listOf(
+                                                "Recent list" to {
+                                                    shelfSection = ShelfSection.RECENT
+                                                    showDrawer = false
+                                                },
+                                                "My Shelf" to {
+                                                    shelfSection = ShelfSection.ALL_BOOKS
+                                                    showDrawer = false
+                                                },
+                                                "My Files" to {
+                                                    showDrawer = false
+                                                    startFolderScan()
+                                                },
+                                                "Doc Scanner" to {
+                                                    showDrawer = false
+                                                    showDocScanner = true
+                                                },
+                                                "Bookmarks" to {
+                                                    shelfSection = ShelfSection.BOOKMARKS
+                                                    showDrawer = false
+                                                }
+                                            )
+
+                                            for (pair in drawerItems) {
                                                 Text(
-                                                    text = book.title,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-
-                                                Spacer(modifier = Modifier.height(4.dp))
-
-                                                LinearProgressIndicator(
-                                                    progress = progress,
+                                                    text = pair.first,
+                                                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .height(4.dp)
-                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .clickable { pair.second() }
+                                                        .padding(horizontal = 20.dp, vertical = 14.dp)
                                                 )
+                                                HorizontalDivider()
+                                            }
 
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
+                                            Spacer(modifier = Modifier.weight(1f))
+
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        viewMode = when (viewMode) {
+                                                            LibraryViewMode.GRID_3 -> LibraryViewMode.GRID_2
+                                                            LibraryViewMode.GRID_2 -> LibraryViewMode.LIST
+                                                            LibraryViewMode.LIST -> LibraryViewMode.GRID_3
+                                                        }
+                                                    },
+                                                    modifier = Modifier.weight(1f),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                                                 ) {
                                                     Text(
-                                                        text = "$percent% • ${book.pageCount}",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        text = when (viewMode) {
+                                                            LibraryViewMode.GRID_3 -> "3-Col"
+                                                            LibraryViewMode.GRID_2 -> "2-Col"
+                                                            LibraryViewMode.LIST -> "List"
+                                                        },
                                                         maxLines = 1,
                                                         softWrap = false
                                                     )
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        showDrawer = false
+                                                        showAboutDialog = true
+                                                    },
+                                                    modifier = Modifier.weight(1f),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text("About", maxLines = 1, softWrap = false)
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = { isDarkTheme = !isDarkTheme },
+                                                    modifier = Modifier.weight(1.2f),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                                                ) {
                                                     Text(
-                                                        text = "Del",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.error,
+                                                        text = if (isDarkTheme) "Day" else "Night",
                                                         maxLines = 1,
-                                                        softWrap = false,
-                                                        modifier = Modifier.clickable {
-                                                            val updated = books.filter { it.uriString != book.uriString }
-                                                            books = updated
-                                                            saveBooks(context, updated)
-                                                        }
+                                                        softWrap = false
                                                     )
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = { finish() },
+                                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text("Exit", maxLines = 1, softWrap = false)
                                                 }
                                             }
                                         }
                                     }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
+                                            .clickable { showDrawer = false }
+                                    )
                                 }
                             }
                         }
