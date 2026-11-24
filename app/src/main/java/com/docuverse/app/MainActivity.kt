@@ -41,7 +41,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -66,6 +65,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -95,6 +96,13 @@ enum class LibraryViewMode {
     GRID_2, GRID_3, LIST
 }
 
+enum class ScanFilterMode(val label: String) {
+    ORIGINAL("Original"),
+    DOC_BW("Doc B&W"),
+    MAGIC_COLOR("Magic Color"),
+    GRAYSCALE("Grayscale")
+}
+
 data class BookItem(
     val uriString: String,
     val title: String,
@@ -103,6 +111,13 @@ data class BookItem(
     val lastPage: Int = 0,
     val cover: Bitmap? = null,
     val metadataLoaded: Boolean = false
+)
+
+data class ExportedScanResult(
+    val title: String,
+    val format: String,
+    val uris: List<Uri>,
+    val bookItem: BookItem? = null
 )
 
 class MainActivity : ComponentActivity() {
@@ -328,37 +343,66 @@ class MainActivity : ComponentActivity() {
                                 "Scan_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                             )
                         }
-                        var scannedPages by remember { mutableStateOf(listOf<Bitmap>()) }
-                        var enhanceDoc by remember { mutableStateOf(true) }
+                        // Raw source images kept so side trims & filters can be adjusted anytime before adding/saving
+                        var rawSources by remember { mutableStateOf(listOf<Bitmap>()) }
+                        var stagedPages by remember { mutableStateOf(listOf<Bitmap>()) }
+                        var selectedIndex by remember { mutableIntStateOf(0) }
+
+                        // Pre-scan side crop fractions (0.0 to 0.35 on each side) & filter mode
+                        var cropLeft by remember { mutableFloatStateOf(0f) }
+                        var cropTop by remember { mutableFloatStateOf(0f) }
+                        var cropRight by remember { mutableFloatStateOf(0f) }
+                        var cropBottom by remember { mutableFloatStateOf(0f) }
+                        var filterMode by remember { mutableStateOf(ScanFilterMode.DOC_BW) }
+
                         var docStatus by remember { mutableStateOf("") }
-                        var isSavingDoc by remember { mutableStateOf(false) }
+                        var isProcessingDoc by remember { mutableStateOf(false) }
+                        var lastExported by remember { mutableStateOf<ExportedScanResult?>(null) }
+
+                        fun applyEditToBitmap(source: Bitmap): Bitmap {
+                            val cropped = cropSidesBitmap(source, cropLeft, cropTop, cropRight, cropBottom)
+                            return applyScanFilter(cropped, filterMode)
+                        }
 
                         val cameraSnapLauncher = rememberLauncherForActivityResult(
                             contract = ActivityResultContracts.TakePicturePreview()
                         ) { bmp: Bitmap? ->
                             if (bmp != null) {
-                                val processed = if (enhanceDoc) applyDocumentContrast(bmp) else bmp
-                                scannedPages = scannedPages + processed
-                                docStatus = "Captured page ${scannedPages.size}."
+                                val updatedRaw = rawSources + bmp
+                                rawSources = updatedRaw
+                                val edited = applyEditToBitmap(bmp)
+                                stagedPages = stagedPages + edited
+                                selectedIndex = stagedPages.lastIndex
+                                docStatus = "Captured page ${stagedPages.size}. Adjust sides or filter, then Add/Save."
                             } else {
                                 docStatus = "Camera capture cancelled."
                             }
                         }
 
-                        val galleryPhotoLauncher = rememberLauncherForActivityResult(
-                            contract = ActivityResultContracts.GetContent()
-                        ) { uri: Uri? ->
-                            if (uri != null) {
+                        val multiGalleryLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.OpenMultipleDocuments()
+                        ) { uris: List<Uri> ->
+                            if (uris.isNotEmpty()) {
+                                isProcessingDoc = true
+                                docStatus = "Loading ${uris.size} photo(s)..."
                                 Thread {
-                                    val loaded = decodeBitmapFromUri(context, uri)
+                                    val loaded = mutableListOf<Bitmap>()
+                                    for (u in uris) {
+                                        val b = decodeBitmapFromUri(context, u)
+                                        if (b != null) loaded.add(b)
+                                    }
                                     runOnUiThread {
-                                        if (loaded != null) {
-                                            val processed = if (enhanceDoc) applyDocumentContrast(loaded) else loaded
-                                            scannedPages = scannedPages + processed
-                                            docStatus = "Added photo page ${scannedPages.size}."
+                                        if (loaded.isNotEmpty()) {
+                                            val startIdx = stagedPages.size
+                                            rawSources = rawSources + loaded
+                                            val editedList = loaded.map { applyEditToBitmap(it) }
+                                            stagedPages = stagedPages + editedList
+                                            selectedIndex = startIdx.coerceIn(0, stagedPages.lastIndex)
+                                            docStatus = "Loaded ${loaded.size} photo(s). Cut sides or pick filter before saving."
                                         } else {
-                                            docStatus = "Could not read selected image."
+                                            docStatus = "Could not read selected image files."
                                         }
+                                        isProcessingDoc = false
                                     }
                                 }.start()
                             }
@@ -367,6 +411,7 @@ class MainActivity : ComponentActivity() {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
                                 .padding(horizontal = 16.dp, vertical = 22.dp)
                         ) {
                             Row(
@@ -378,7 +423,7 @@ class MainActivity : ComponentActivity() {
                                     Text("Shelf", maxLines = 1, softWrap = false)
                                 }
                                 Text(
-                                    text = "Document Scanner",
+                                    text = "DocuVerse Scan Studio",
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
@@ -387,7 +432,7 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
                             OutlinedTextField(
                                 value = docTitle,
@@ -400,79 +445,251 @@ class MainActivity : ComponentActivity() {
 
                             Spacer(modifier = Modifier.height(8.dp))
 
+                            // Source actions: Camera + Multi-Photo Phone/Gallery picker
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
                                     onClick = { cameraSnapLauncher.launch(null) },
-                                    enabled = !isSavingDoc,
+                                    enabled = !isProcessingDoc,
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("Snap Page", maxLines = 1, softWrap = false)
+                                    Text("Camera", maxLines = 1, softWrap = false)
                                 }
                                 OutlinedButton(
-                                    onClick = { galleryPhotoLauncher.launch("image/*") },
-                                    enabled = !isSavingDoc,
-                                    modifier = Modifier.weight(1f)
+                                    onClick = { multiGalleryLauncher.launch(arrayOf("image/*")) },
+                                    enabled = !isProcessingDoc,
+                                    modifier = Modifier.weight(1.3f)
                                 ) {
-                                    Text("Pick Photo", maxLines = 1, softWrap = false)
-                                }
-                                OutlinedButton(
-                                    onClick = { enhanceDoc = !enhanceDoc },
-                                    enabled = !isSavingDoc,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = if (enhanceDoc) "Filter: ON" else "Filter: OFF",
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
+                                    Text("Pick Photos", maxLines = 1, softWrap = false)
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))
 
+                            // Pre-scan Filter selector row
+                            Text(
+                                text = "Pre-Scan Filter",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(ScanFilterMode.entries) { mode ->
+                                    val selected = filterMode == mode
+                                    OutlinedButton(
+                                        onClick = {
+                                            filterMode = mode
+                                            if (rawSources.isNotEmpty()) {
+                                                stagedPages = rawSources.map { applyEditToBitmap(it) }
+                                            }
+                                        }
+                                    ) {
+                                        Text(
+                                            text = if (selected) "${mode.label} ✓" else mode.label,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Pre-scan Side Cut / Crop controls (adjusts page view before saving)
+                            Text(
+                                text = "Cut Sides: L ${(cropLeft * 100).toInt()}% • R ${(cropRight * 100).toInt()}% • T ${(cropTop * 100).toInt()}% • B ${(cropBottom * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        cropLeft = (cropLeft + 0.05f).coerceAtMost(0.35f)
+                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Cut L", maxLines = 1, softWrap = false)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        cropRight = (cropRight + 0.05f).coerceAtMost(0.35f)
+                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Cut R", maxLines = 1, softWrap = false)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        cropTop = (cropTop + 0.05f).coerceAtMost(0.35f)
+                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Cut Top", maxLines = 1, softWrap = false)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        cropBottom = (cropBottom + 0.05f).coerceAtMost(0.35f)
+                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Cut Bot", maxLines = 1, softWrap = false)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        cropLeft = 0f
+                                        cropTop = 0f
+                                        cropRight = 0f
+                                        cropBottom = 0f
+                                        if (rawSources.isNotEmpty()) stagedPages = rawSources.map { applyEditToBitmap(it) }
+                                    }
+                                ) {
+                                    Text("Reset", maxLines = 1, softWrap = false)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Live preview of selected edited page before saving
+                            if (stagedPages.isNotEmpty()) {
+                                val safeSel = selectedIndex.coerceIn(0, stagedPages.lastIndex)
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(240.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Preview Page ${safeSel + 1} of ${stagedPages.size}",
+                                                style = MaterialTheme.typography.labelLarge
+                                            )
+                                            Text(
+                                                text = "Remove Page",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.clickable {
+                                                    val newRaw = rawSources.filterIndexed { i, _ -> i != safeSel }
+                                                    val newStaged = stagedPages.filterIndexed { i, _ -> i != safeSel }
+                                                    rawSources = newRaw
+                                                    stagedPages = newStaged
+                                                    selectedIndex = 0
+                                                }
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Image(
+                                            bitmap = stagedPages[safeSel].asImageBitmap(),
+                                            contentDescription = "Edited Preview",
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp)),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(stagedPages.indices.toList()) { idx ->
+                                        OutlinedButton(
+                                            onClick = { selectedIndex = idx }
+                                        ) {
+                                            Text(
+                                                text = if (idx == safeSel) "P${idx + 1} ✓" else "P${idx + 1}",
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(160.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Tap 'Camera' or 'Pick Photos' (select multiple) to edit & scan.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.padding(14.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Export actions: Save PDF / Save JPEG / Clear
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
                                     onClick = {
-                                        if (scannedPages.isEmpty()) {
-                                            docStatus = "Snap or pick at least 1 page first."
+                                        if (stagedPages.isEmpty()) {
+                                            docStatus = "Add at least 1 photo first."
                                         } else {
-                                            isSavingDoc = true
-                                            docStatus = "Creating PDF..."
-                                            val pagesCopy = scannedPages.toList()
+                                            isProcessingDoc = true
+                                            docStatus = "Generating PDF..."
+                                            val pagesCopy = stagedPages.toList()
                                             val cleanName = sanitizeFileName(docTitle)
                                             Thread {
                                                 val savedUri = savePagesAsPdf(context, cleanName, pagesCopy)
                                                 runOnUiThread {
-                                                    isSavingDoc = false
+                                                    isProcessingDoc = false
                                                     if (savedUri != null) {
                                                         val thumb = renderSinglePage(context, savedUri, 0, 0.5f)
-                                                        addBookToShelf(
-                                                            BookItem(
-                                                                uriString = savedUri.toString(),
-                                                                title = cleanName,
-                                                                format = "PDF",
-                                                                pageCount = pagesCopy.size,
-                                                                lastPage = 0,
-                                                                cover = thumb,
-                                                                metadataLoaded = true
-                                                            )
+                                                        val book = BookItem(
+                                                            uriString = savedUri.toString(),
+                                                            title = cleanName,
+                                                            format = "PDF",
+                                                            pageCount = pagesCopy.size,
+                                                            lastPage = 0,
+                                                            cover = thumb,
+                                                            metadataLoaded = true
                                                         )
-                                                        scanNotice = "Saved PDF '$cleanName.pdf' and added to library."
-                                                        docStatus = "Saved PDF: $cleanName.pdf"
+                                                        addBookToShelf(book)
+                                                        lastExported = ExportedScanResult(
+                                                            title = cleanName,
+                                                            format = "PDF",
+                                                            uris = listOf(savedUri),
+                                                            bookItem = book
+                                                        )
+                                                        docStatus = "PDF ready: $cleanName.pdf (added to Shelf)"
                                                     } else {
-                                                        docStatus = "Failed to save PDF file."
+                                                        docStatus = "Could not create PDF."
                                                     }
                                                 }
                                             }.start()
                                         }
                                     },
-                                    enabled = !isSavingDoc && scannedPages.isNotEmpty(),
+                                    enabled = !isProcessingDoc && stagedPages.isNotEmpty(),
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text("Save PDF", maxLines = 1, softWrap = false)
@@ -480,28 +697,33 @@ class MainActivity : ComponentActivity() {
 
                                 Button(
                                     onClick = {
-                                        if (scannedPages.isEmpty()) {
-                                            docStatus = "Snap or pick at least 1 page first."
+                                        if (stagedPages.isEmpty()) {
+                                            docStatus = "Add at least 1 photo first."
                                         } else {
-                                            isSavingDoc = true
-                                            docStatus = "Saving JPEG..."
-                                            val pagesCopy = scannedPages.toList()
+                                            isProcessingDoc = true
+                                            docStatus = "Saving JPEG(s)..."
+                                            val pagesCopy = stagedPages.toList()
                                             val cleanName = sanitizeFileName(docTitle)
                                             Thread {
-                                                val savedCount = savePagesAsJpegs(context, cleanName, pagesCopy)
+                                                val savedUris = savePagesAsJpegsWithUris(context, cleanName, pagesCopy)
                                                 runOnUiThread {
-                                                    isSavingDoc = false
-                                                    if (savedCount > 0) {
-                                                        scanNotice = "Saved $savedCount JPEG file(s) to Downloads/Documents."
-                                                        docStatus = "Saved $savedCount JPEG file(s)!"
+                                                    isProcessingDoc = false
+                                                    if (savedUris.isNotEmpty()) {
+                                                        lastExported = ExportedScanResult(
+                                                            title = cleanName,
+                                                            format = "JPEG",
+                                                            uris = savedUris,
+                                                            bookItem = null
+                                                        )
+                                                        docStatus = "Saved ${savedUris.size} JPEG file(s)!"
                                                     } else {
-                                                        docStatus = "Failed to save JPEG file."
+                                                        docStatus = "Could not save JPEG."
                                                     }
                                                 }
                                             }.start()
                                         }
                                     },
-                                    enabled = !isSavingDoc && scannedPages.isNotEmpty(),
+                                    enabled = !isProcessingDoc && stagedPages.isNotEmpty(),
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text("Save JPEG", maxLines = 1, softWrap = false)
@@ -509,17 +731,20 @@ class MainActivity : ComponentActivity() {
 
                                 OutlinedButton(
                                     onClick = {
-                                        scannedPages = listOf()
-                                        docStatus = "Cleared pages."
+                                        rawSources = listOf()
+                                        stagedPages = listOf()
+                                        selectedIndex = 0
+                                        lastExported = null
+                                        docStatus = "Cleared."
                                     },
-                                    enabled = !isSavingDoc && scannedPages.isNotEmpty()
+                                    enabled = !isProcessingDoc && (stagedPages.isNotEmpty() || lastExported != null)
                                 ) {
                                     Text("Clear", maxLines = 1, softWrap = false)
                                 }
                             }
 
                             if (docStatus.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(6.dp))
                                 Text(
                                     text = docStatus,
                                     style = MaterialTheme.typography.bodySmall,
@@ -527,81 +752,61 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Text(
-                                text = "Captured Pages (${scannedPages.size})",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            if (scannedPages.isEmpty()) {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                    contentAlignment = Alignment.Center
+                            // Post-Scan Adobe Scan style action card
+                            val exported = lastExported
+                            if (exported != null && exported.uris.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(
-                                        text = "Tap 'Snap Page' or 'Pick Photo' to scan pages into PDF or JPEG.",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        modifier = Modifier.padding(16.dp)
-                                    )
-                                }
-                            } else {
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth()
-                                ) {
-                                    items(scannedPages.indices.toList()) { idx ->
-                                        val pageBmp = scannedPages[idx]
-                                        Card(
-                                            shape = RoundedCornerShape(10.dp),
-                                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                                            modifier = Modifier
-                                                .fillMaxHeight()
-                                                .aspectRatio(0.75f)
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            text = "Scanned ${exported.format}: ${exported.title}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Column(modifier = Modifier.padding(8.dp)) {
-                                                Image(
-                                                    bitmap = pageBmp.asImageBitmap(),
-                                                    contentDescription = "Page ${idx + 1}",
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(6.dp)),
-                                                    contentScale = ContentScale.Fit
-                                                )
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
+                                            Button(
+                                                onClick = {
+                                                    shareExportedScan(context, exported)
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Share", maxLines = 1, softWrap = false)
+                                            }
+                                            if (exported.bookItem != null) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        val b = exported.bookItem
+                                                        showDocScanner = false
+                                                        openBook(b)
+                                                    },
+                                                    modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text(
-                                                        text = "Page ${idx + 1}",
-                                                        style = MaterialTheme.typography.labelMedium
-                                                    )
-                                                    Text(
-                                                        text = "Remove",
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        color = MaterialTheme.colorScheme.error,
-                                                        modifier = Modifier.clickable {
-                                                            scannedPages = scannedPages.filterIndexed { i, _ -> i != idx }
-                                                        }
-                                                    )
+                                                    Text("Read PDF", maxLines = 1, softWrap = false)
                                                 }
+                                            }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    lastExported = null
+                                                    showDocScanner = false
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Done", maxLines = 1, softWrap = false)
                                             }
                                         }
                                     }
                                 }
                             }
+
+                            Spacer(modifier = Modifier.height(24.dp))
                         }
                     } else if (activeBook != null) {
                         val currentBook = activeBook as BookItem
@@ -1284,29 +1489,101 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun sanitizeFileName(raw: String): String {
-        val cleaned = raw.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
-        return if (cleaned.isBlank()) "Scanned_Doc" else cleaned
+    private fun shareExportedScan(context: Context, exported: ExportedScanResult) {
+        try {
+            if (exported.uris.size == 1) {
+                val uri = exported.uris.first()
+                val mime = if (exported.format == "PDF") "application/pdf" else "image/jpeg"
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = mime
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, exported.title)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "Share ${exported.title}"))
+            } else if (exported.uris.size > 1) {
+                val uriList = ArrayList(exported.uris)
+                val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                    type = "image/jpeg"
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, uriList)
+                    putExtra(Intent.EXTRA_SUBJECT, exported.title)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "Share ${exported.title}"))
+            }
+        } catch (_: Exception) {
+        }
     }
 
-    private fun applyDocumentContrast(src: Bitmap): Bitmap {
+    private fun cropSidesBitmap(
+        src: Bitmap,
+        leftFrac: Float,
+        topFrac: Float,
+        rightFrac: Float,
+        bottomFrac: Float
+    ): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w <= 2 || h <= 2) return src
+
+        val x0 = (w * leftFrac).toInt().coerceIn(0, w - 2)
+        val y0 = (h * topFrac).toInt().coerceIn(0, h - 2)
+        val x1 = (w * (1f - rightFrac)).toInt().coerceIn(x0 + 1, w)
+        val y1 = (h * (1f - bottomFrac)).toInt().coerceIn(y0 + 1, h)
+        val cropW = (x1 - x0).coerceAtLeast(1)
+        val cropH = (y1 - y0).coerceAtLeast(1)
+        return Bitmap.createBitmap(src, x0, y0, cropW, cropH)
+    }
+
+    private fun applyScanFilter(src: Bitmap, mode: ScanFilterMode): Bitmap {
+        if (mode == ScanFilterMode.ORIGINAL) return src
         val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
-        val contrast = 1.25f
-        val brightness = 10f
-        val cm = ColorMatrix(
-            floatArrayOf(
-                contrast, 0f, 0f, 0f, brightness,
-                0f, contrast, 0f, 0f, brightness,
-                0f, 0f, contrast, 0f, brightness,
-                0f, 0f, 0f, 1f, 0f
-            )
-        )
+        val cm = ColorMatrix()
+        when (mode) {
+            ScanFilterMode.ORIGINAL -> Unit
+            ScanFilterMode.DOC_BW -> {
+                cm.setSaturation(0f)
+                val contrast = 1.65f
+                val brightness = 16f
+                val bwMatrix = ColorMatrix(
+                    floatArrayOf(
+                        contrast, 0f, 0f, 0f, brightness,
+                        0f, contrast, 0f, 0f, brightness,
+                        0f, 0f, contrast, 0f, brightness,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
+                cm.postConcat(bwMatrix)
+            }
+            ScanFilterMode.MAGIC_COLOR -> {
+                cm.setSaturation(1.35f)
+                val contrast = 1.25f
+                val brightness = 8f
+                val colorMatrix = ColorMatrix(
+                    floatArrayOf(
+                        contrast, 0f, 0f, 0f, brightness,
+                        0f, contrast, 0f, 0f, brightness,
+                        0f, 0f, contrast, 0f, brightness,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
+                cm.postConcat(colorMatrix)
+            }
+            ScanFilterMode.GRAYSCALE -> {
+                cm.setSaturation(0f)
+            }
+        }
         val paint = Paint().apply {
             colorFilter = ColorMatrixColorFilter(cm)
         }
         canvas.drawBitmap(src, 0f, 0f, paint)
         return out
+    }
+
+    private fun sanitizeFileName(raw: String): String {
+        val cleaned = raw.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        return if (cleaned.isBlank()) "Scanned_Doc" else cleaned
     }
 
     private fun decodeBitmapFromUri(context: Context, uri: Uri): Bitmap? {
@@ -1377,8 +1654,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun savePagesAsJpegs(context: Context, baseName: String, pages: List<Bitmap>): Int {
-        var saved = 0
+    private fun savePagesAsJpegsWithUris(context: Context, baseName: String, pages: List<Bitmap>): List<Uri> {
+        val savedUris = mutableListOf<Uri>()
         for (i in pages.indices) {
             val bmp = pages[i]
             val suffix = if (pages.size == 1) "" else "_p${i + 1}"
@@ -1395,7 +1672,7 @@ class MainActivity : ComponentActivity() {
                         context.contentResolver.openOutputStream(uri)?.use { out ->
                             bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
                         }
-                        saved++
+                        savedUris.add(uri)
                     }
                 } else {
                     val dir = File(
@@ -1407,12 +1684,12 @@ class MainActivity : ComponentActivity() {
                     FileOutputStream(outFile).use { out ->
                         bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
                     }
-                    saved++
+                    savedUris.add(Uri.fromFile(outFile))
                 }
             } catch (_: Exception) {
             }
         }
-        return saved
+        return savedUris
     }
 
     private fun collectBooksFromTreeFast(
