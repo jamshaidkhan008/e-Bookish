@@ -83,7 +83,8 @@ data class BookItem(
     val format: String = "PDF",
     val pageCount: Int,
     val lastPage: Int = 0,
-    val cover: Bitmap? = null
+    val cover: Bitmap? = null,
+    val metadataLoaded: Boolean = false
 )
 
 class MainActivity : ComponentActivity() {
@@ -109,26 +110,48 @@ class MainActivity : ComponentActivity() {
                     var epubChapters by remember { mutableStateOf(listOf<String>()) }
                     var isLoadingReader by remember { mutableStateOf(false) }
 
+                    // Fast background enrichment: fill pageCount & cover gradually without blocking scan
                     LaunchedEffect(books.size) {
-                        val needsCover = books.any { it.format == "PDF" && it.cover == null }
-                        if (needsCover) {
+                        val pending = books.filter { !it.metadataLoaded }
+                        if (pending.isNotEmpty()) {
                             Thread {
-                                val updatedList = books.map { b ->
-                                    if (b.format == "PDF" && b.cover == null) {
-                                        val thumb = renderSinglePage(context, Uri.parse(b.uriString), 0, 0.7f)
-                                        b.copy(cover = thumb)
-                                    } else {
-                                        b
+                                val working = books.toMutableList()
+                                var changed = false
+                                for (i in working.indices) {
+                                    val b = working[i]
+                                    if (!b.metadataLoaded) {
+                                        val uri = Uri.parse(b.uriString)
+                                        if (b.format == "EPUB") {
+                                            val chapters = extractEpubChapters(context, uri)
+                                            val count = if (chapters.isNotEmpty()) chapters.size else 1
+                                            working[i] = b.copy(pageCount = count, metadataLoaded = true)
+                                            changed = true
+                                        } else {
+                                            val count = getPdfPageCount(context, uri)
+                                            val thumb = renderSinglePage(context, uri, 0, 0.45f)
+                                            working[i] = b.copy(
+                                                pageCount = if (count > 0) count else 1,
+                                                cover = thumb,
+                                                metadataLoaded = true
+                                            )
+                                            changed = true
+                                        }
+                                        if (changed && (i + 1) % 3 == 0) {
+                                            val snapshot = working.toList()
+                                            runOnUiThread { books = snapshot }
+                                        }
                                     }
                                 }
-                                runOnUiThread {
-                                    books = updatedList
+                                if (changed) {
+                                    val finalSnapshot = working.toList()
+                                    saveBooks(context, finalSnapshot)
+                                    runOnUiThread { books = finalSnapshot }
                                 }
                             }.start()
                         }
                     }
 
-                    fun buildBookFromUri(uri: Uri, knownName: String? = null): BookItem? {
+                    fun quickBookItem(uri: Uri, knownName: String? = null): BookItem? {
                         try {
                             contentResolver.takePersistableUriPermission(
                                 uri,
@@ -149,30 +172,15 @@ class MainActivity : ComponentActivity() {
                             .removeSuffix(".pdf").removeSuffix(".PDF")
                             .removeSuffix(".epub").removeSuffix(".EPUB")
 
-                        return if (isEpub) {
-                            val chapters = extractEpubChapters(context, uri)
-                            val count = if (chapters.isNotEmpty()) chapters.size else 1
-                            BookItem(
-                                uriString = uri.toString(),
-                                title = title,
-                                format = "EPUB",
-                                pageCount = count,
-                                lastPage = 0,
-                                cover = null
-                            )
-                        } else {
-                            val count = getPdfPageCount(context, uri)
-                            if (count <= 0) return null
-                            val thumb = renderSinglePage(context, uri, 0, 0.7f)
-                            BookItem(
-                                uriString = uri.toString(),
-                                title = title,
-                                format = "PDF",
-                                pageCount = count,
-                                lastPage = 0,
-                                cover = thumb
-                            )
-                        }
+                        return BookItem(
+                            uriString = uri.toString(),
+                            title = title,
+                            format = if (isEpub) "EPUB" else "PDF",
+                            pageCount = 1,
+                            lastPage = 0,
+                            cover = null,
+                            metadataLoaded = false
+                        )
                     }
 
                     val addBookLauncher = rememberLauncherForActivityResult(
@@ -182,17 +190,15 @@ class MainActivity : ComponentActivity() {
                             Thread {
                                 val addedItems = mutableListOf<BookItem>()
                                 for (u in uris) {
-                                    val item = buildBookFromUri(u)
-                                    if (item != null) {
-                                        addedItems.add(item)
-                                    }
+                                    val item = quickBookItem(u)
+                                    if (item != null) addedItems.add(item)
                                 }
                                 runOnUiThread {
                                     val existingUris = addedItems.map { it.uriString }.toSet()
                                     val updated = addedItems + books.filter { it.uriString !in existingUris }
                                     books = updated
                                     saveBooks(context, updated)
-                                    scanNotice = "Imported ${addedItems.size} book(s) into library."
+                                    scanNotice = "Imported ${addedItems.size} book(s). Thumbnails loading in background..."
                                 }
                             }.start()
                         }
@@ -200,9 +206,13 @@ class MainActivity : ComponentActivity() {
 
                     fun scanTreeUri(treeUri: Uri) {
                         isScanning = true
-                        scanNotice = "Scanning folder and subfolders..."
+                        scanNotice = "Fast scanning folder..."
                         Thread {
-                            val discovered = collectBooksFromTree(context, treeUri)
+                            val discovered = collectBooksFromTreeFast(context, treeUri) { countSoFar ->
+                                runOnUiThread {
+                                    scanNotice = "Scanning... found $countSoFar book(s)"
+                                }
+                            }
                             val newBooks = mutableListOf<BookItem>()
                             val currentUris = books.map { it.uriString }.toMutableSet()
 
@@ -211,7 +221,7 @@ class MainActivity : ComponentActivity() {
                                 val docName = pair.second
                                 val uriStr = docUri.toString()
                                 if (uriStr !in currentUris) {
-                                    val item = buildBookFromUri(docUri, docName)
+                                    val item = quickBookItem(docUri, docName)
                                     if (item != null) {
                                         newBooks.add(item)
                                         currentUris.add(uriStr)
@@ -219,15 +229,15 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
+                            val updated = newBooks + books
+                            saveBooks(context, updated)
                             runOnUiThread {
-                                val updated = newBooks + books
                                 books = updated
-                                saveBooks(context, updated)
                                 isScanning = false
                                 scanNotice = if (newBooks.isNotEmpty()) {
-                                    "Added ${newBooks.size} new book(s) from folder!"
+                                    "Added ${newBooks.size} book(s) quickly! Covers & page counts filling in."
                                 } else {
-                                    "Found ${discovered.size} book(s) in folder (all already in library)."
+                                    "Found ${discovered.size} book(s) (all already in library)."
                                 }
                             }
                         }.start()
@@ -903,19 +913,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun collectBooksFromTree(context: Context, treeUri: Uri): List<Pair<Uri, String>> {
+    private fun collectBooksFromTreeFast(
+        context: Context,
+        treeUri: Uri,
+        onProgress: (Int) -> Unit
+    ): List<Pair<Uri, String>> {
         val found = mutableListOf<Pair<Uri, String>>()
         val queue = ArrayDeque<String>()
         val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
         queue.add(rootDocId)
 
+        val skippedDirs = setOf("android", "dcim", "movies", "music", "cache", ".thumbnails")
         val projection = arrayOf(
             DocumentsContract.Document.COLUMN_DOCUMENT_ID,
             DocumentsContract.Document.COLUMN_DISPLAY_NAME,
             DocumentsContract.Document.COLUMN_MIME_TYPE
         )
 
-        while (queue.isNotEmpty()) {
+        var lastReported = 0
+        while (queue.isNotEmpty() && found.size < 300) {
             val parentDocId = queue.removeFirst()
             val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
             try {
@@ -924,13 +940,16 @@ class MainActivity : ComponentActivity() {
                     val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                     val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
 
-                    while (cursor.moveToNext()) {
+                    while (cursor.moveToNext() && found.size < 300) {
                         val docId = if (idIdx >= 0) cursor.getString(idIdx) else continue
                         val name = if (nameIdx >= 0) cursor.getString(nameIdx) ?: "" else ""
                         val mime = if (mimeIdx >= 0) cursor.getString(mimeIdx) ?: "" else ""
 
                         if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                            queue.add(docId)
+                            val dirLower = name.lowercase()
+                            if (dirLower !in skippedDirs && !dirLower.startsWith(".")) {
+                                queue.add(docId)
+                            }
                         } else {
                             val lower = name.lowercase()
                             if (lower.endsWith(".pdf") || lower.endsWith(".epub") ||
@@ -938,6 +957,10 @@ class MainActivity : ComponentActivity() {
                             ) {
                                 val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
                                 found.add(Pair(docUri, name))
+                                if (found.size - lastReported >= 5) {
+                                    lastReported = found.size
+                                    onProgress(found.size)
+                                }
                             }
                         }
                     }
@@ -945,6 +968,7 @@ class MainActivity : ComponentActivity() {
             } catch (_: Exception) {
             }
         }
+        onProgress(found.size)
         return found
     }
 
@@ -1023,7 +1047,8 @@ class MainActivity : ComponentActivity() {
                         format = obj.optString("format", "PDF"),
                         pageCount = obj.getInt("pageCount"),
                         lastPage = obj.optInt("lastPage", 0),
-                        cover = null
+                        cover = null,
+                        metadataLoaded = false
                     )
                 )
             }
