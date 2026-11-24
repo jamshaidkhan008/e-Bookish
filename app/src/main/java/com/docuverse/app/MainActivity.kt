@@ -33,6 +33,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -95,6 +96,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -1205,7 +1208,6 @@ class MainActivity : ComponentActivity() {
                             epubChapters = listOf()
                         }
 
-                        var zoomScale by remember(currentBook.uriString) { mutableStateOf(1f) }
                         var showReaderBars by remember { mutableStateOf(false) }
                         var showAaPanel by remember { mutableStateOf(false) }
 
@@ -1259,7 +1261,6 @@ class MainActivity : ComponentActivity() {
                                         saveBooks(context, updatedBooks)
                                     }
 
-                                    // Full-screen chapter canvas
                                     HorizontalPager(
                                         state = pagerState,
                                         modifier = Modifier.fillMaxSize()
@@ -1284,7 +1285,6 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
 
-                                    // Left edge tap zone: previous section
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.CenterStart)
@@ -1299,7 +1299,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                     )
 
-                                    // Center tap zone: toggles top & bottom reader bars like ReadEra
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.Center)
@@ -1311,7 +1310,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                     )
 
-                                    // Right edge tap zone: next section
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.CenterEnd)
@@ -1326,7 +1324,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                     )
 
-                                    // Top & Bottom ReadEra overlay bars shown when tapping the page
                                     if (showReaderBars) {
                                         Column(
                                             modifier = Modifier
@@ -1555,7 +1552,6 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
 
-                                        // Bottom ReadEra-style progress & jump bar when bars are visible
                                         val pct = ((pagerState.currentPage + 1) * 100) / epubChapters.size
                                         val progFrac = ((pagerState.currentPage + 1).toFloat() / epubChapters.size.toFloat()).coerceIn(0f, 1f)
                                         Column(
@@ -1618,64 +1614,12 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         } else {
-                            Column(
+                            // PDF Reader with pinch-to-zoom and ReadEra-style bottom page counter
+                            Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 14.dp, vertical = 20.dp)
+                                    .background(MaterialTheme.colorScheme.background)
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    OutlinedButton(onClick = {
-                                        activeBook = null
-                                        readerPages = listOf()
-                                    }) {
-                                        Text("Shelf", maxLines = 1, softWrap = false)
-                                    }
-                                    Text(
-                                        text = currentBook.title,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            val next = zoomScale - 0.25f
-                                            zoomScale = if (next < 0.75f) 0.75f else next
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text("Zoom -", maxLines = 1, softWrap = false)
-                                    }
-                                    OutlinedButton(
-                                        onClick = {
-                                            val next = zoomScale + 0.25f
-                                            zoomScale = if (next > 2.5f) 2.5f else next
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text("Zoom +", maxLines = 1, softWrap = false)
-                                    }
-                                    OutlinedButton(
-                                        onClick = { zoomScale = 1f },
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text("${(zoomScale * 100).toInt()}%", maxLines = 1, softWrap = false)
-                                    }
-                                }
-
                                 if (isLoadingReader) {
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
@@ -1720,113 +1664,107 @@ class MainActivity : ComponentActivity() {
                                         saveBooks(context, updatedBooks)
                                     }
 
-                                    Text(
-                                        text = "Page ${pagerState.currentPage + 1} of ${readerPages.size}",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                                    )
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxWidth()
-                                    ) {
-                                        HorizontalPager(
-                                            state = pagerState,
-                                            modifier = Modifier.fillMaxSize()
-                                        ) { pageIndex ->
-                                            val pageBmp: Bitmap = readerPages[pageIndex]
-                                            val imgWidthFraction = if (zoomScale < 0.5f) {
-                                                0.5f
-                                            } else if (zoomScale > 1f) {
-                                                1f
-                                            } else {
-                                                zoomScale
-                                            }
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .verticalScroll(rememberScrollState()),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Image(
-                                                    bitmap = pageBmp.asImageBitmap(),
-                                                    contentDescription = "Page ${pageIndex + 1}",
-                                                    modifier = Modifier.fillMaxWidth(imgWidthFraction),
-                                                    contentScale = ContentScale.Fit
-                                                )
-                                            }
+                                    HorizontalPager(
+                                        state = pagerState,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) { pageIndex ->
+                                        val pageBmp: Bitmap = readerPages[pageIndex]
+                                        var pinScale by remember(pageIndex, currentBook.uriString) {
+                                            mutableFloatStateOf(1f)
+                                        }
+                                        var panOffset by remember(pageIndex, currentBook.uriString) {
+                                            mutableStateOf(Offset.Zero)
                                         }
 
                                         Box(
                                             modifier = Modifier
-                                                .align(Alignment.CenterStart)
-                                                .fillMaxHeight()
-                                                .fillMaxWidth(0.2f)
-                                                .clickable {
-                                                    if (pagerState.currentPage > 0) {
-                                                        scope.launch {
-                                                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                .fillMaxSize()
+                                                .pointerInput(pageIndex) {
+                                                    detectTransformGestures { _, pan, zoom, _ ->
+                                                        val newScale = (pinScale * zoom).coerceIn(1f, 3.5f)
+                                                        pinScale = newScale
+                                                        panOffset = if (newScale <= 1f) {
+                                                            Offset.Zero
+                                                        } else {
+                                                            Offset(
+                                                                x = panOffset.x + pan.x,
+                                                                y = panOffset.y + pan.y
+                                                            )
                                                         }
                                                     }
                                                 }
-                                        )
-
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.CenterEnd)
-                                                .fillMaxHeight()
-                                                .fillMaxWidth(0.2f)
                                                 .clickable {
-                                                    if (pagerState.currentPage < readerPages.size - 1) {
-                                                        scope.launch {
-                                                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                                        }
-                                                    }
-                                                }
-                                        )
+                                                    showReaderBars = !showReaderBars
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Image(
+                                                bitmap = pageBmp.asImageBitmap(),
+                                                contentDescription = "Page ${pageIndex + 1}",
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .graphicsLayer {
+                                                        scaleX = pinScale
+                                                        scaleY = pinScale
+                                                        translationX = panOffset.x
+                                                        translationY = panOffset.y
+                                                    },
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        }
                                     }
 
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    if (showReaderBars) {
+                                        Row(
+                                            modifier = Modifier
+                                                .align(Alignment.TopCenter)
+                                                .fillMaxWidth()
+                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+                                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    activeBook = null
+                                                    readerPages = listOf()
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                            ) {
+                                                Text("← Shelf", maxLines = 1, softWrap = false)
+                                            }
+                                            Text(
+                                                text = currentBook.title,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
 
+                                    val pagePct = ((pagerState.currentPage + 1) * 100) / readerPages.size
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .fillMaxWidth()
+                                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+                                            .padding(horizontal = 16.dp, vertical = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                if (pagerState.currentPage > 0) {
-                                                    scope.launch {
-                                                        pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                                                    }
-                                                }
-                                            },
-                                            enabled = pagerState.currentPage > 0
-                                        ) {
-                                            Text("Previous", maxLines = 1, softWrap = false)
-                                        }
-
                                         Text(
-                                            text = "${((pagerState.currentPage + 1) * 100) / readerPages.size}%",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold
+                                            text = "${pagerState.currentPage + 1} of ${readerPages.size}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
-
-                                        OutlinedButton(
-                                            onClick = {
-                                                if (pagerState.currentPage < readerPages.size - 1) {
-                                                    scope.launch {
-                                                        pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                                    }
-                                                }
-                                            },
-                                            enabled = pagerState.currentPage < readerPages.size - 1
-                                        ) {
-                                            Text("Next", maxLines = 1, softWrap = false)
-                                        }
+                                        Text(
+                                            text = "$pagePct%",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
                                     }
                                 }
                             }
