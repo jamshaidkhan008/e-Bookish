@@ -734,7 +734,7 @@ class MainActivity : ComponentActivity() {
                                     Text("Shelf", maxLines = 1, softWrap = false)
                                 }
                                 Text(
-                                    text = "DocuVerse Scan Studio",
+                                    text = "e-Bookish Scan Studio",
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
@@ -1954,7 +1954,7 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier.padding(12.dp),
                                             verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Text("Reader & Library Settings", fontWeight = FontWeight.Bold)
+                                            Text("e-Bookish Reader & Library Settings", fontWeight = FontWeight.Bold)
                                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 OutlinedButton(onClick = { isDarkTheme = !isDarkTheme }) {
                                                     Text(if (isDarkTheme) "Theme: Dark" else "Theme: Light", maxLines = 1, softWrap = false)
@@ -2034,7 +2034,7 @@ class MainActivity : ComponentActivity() {
                                             .padding(bottom = 12.dp)
                                     ) {
                                         Column(modifier = Modifier.padding(14.dp)) {
-                                            Text("DocuVerse (ReadEra Edition)", fontWeight = FontWeight.Bold)
+                                            Text("e-Bookish", fontWeight = FontWeight.Bold)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
                                                 text = "Includes Reading Now, Favorites, To Read, Have Read, Authors, Series, Collections, Formats, Folder Scanner, Trash & Restore, and Document Scanner.",
@@ -2310,7 +2310,7 @@ class MainActivity : ComponentActivity() {
                                                     modifier = Modifier.size(28.dp)
                                                 )
                                                 Text(
-                                                    text = "DocuVerse",
+                                                    text = "e-Bookish",
                                                     style = MaterialTheme.typography.titleLarge,
                                                     fontWeight = FontWeight.Bold
                                                 )
@@ -2414,7 +2414,7 @@ class MainActivity : ComponentActivity() {
                                                 showDrawer = false
                                                 val mailIntent = Intent(Intent.ACTION_SENDTO).apply {
                                                     data = Uri.parse("mailto:")
-                                                    putExtra(Intent.EXTRA_SUBJECT, "DocuVerse Reader Feedback")
+                                                    putExtra(Intent.EXTRA_SUBJECT, "e-Bookish Reader Feedback")
                                                 }
                                                 try {
                                                     context.startActivity(mailIntent)
@@ -2551,7 +2551,7 @@ class MainActivity : ComponentActivity() {
                     val values = ContentValues().apply {
                         put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                         put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DocuVerse")
+                        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/e-Bookish")
                     }
                     val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                     if (uri != null) {
@@ -2563,7 +2563,7 @@ class MainActivity : ComponentActivity() {
                 } else {
                     val dir = File(
                         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                        "DocuVerse"
+                        "e-Bookish"
                     )
                     if (!dir.exists()) dir.mkdirs()
                     val outFile = File(dir, fileName)
@@ -2638,12 +2638,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveSavedFolderUri(context: Context, uriString: String) {
-        val prefs = context.getSharedPreferences("docuverse_library", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
         prefs.edit().putString("scan_tree_uri", uriString).apply()
     }
 
     private fun loadSavedFolderUri(context: Context): String? {
-        val prefs = context.getSharedPreferences("docuverse_library", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
         return prefs.getString("scan_tree_uri", null)
     }
 
@@ -2685,7 +2685,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveBooks(context: Context, books: List<BookItem>) {
-        val prefs = context.getSharedPreferences("docuverse_library", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
         val arr = JSONArray()
         for (b in books) {
             val obj = JSONObject()
@@ -2704,7 +2704,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadBooks(context: Context): List<BookItem> {
-        val prefs = context.getSharedPreferences("docuverse_library", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
         val raw = prefs.getString("books_json", null) ?: return listOf()
         return try {
             val arr = JSONArray(raw)
