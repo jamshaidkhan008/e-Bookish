@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -62,6 +63,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -72,6 +74,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -91,6 +94,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -116,10 +120,21 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipInputStream
+import kotlin.math.sin
 import kotlin.random.Random
 
 private val ReadEraBarColor = ComposeColor(0xFF146C8E)
 private val ReadEraBarText = ComposeColor(0xFFFFFFFF)
+
+private val WoodLightBase = ComposeColor(0xFFD6B48C)
+private val WoodLightWarm = ComposeColor(0xFFC79F72)
+private val WoodGrainDark = ComposeColor(0xFF8C5E34)
+private val WoodGrainSoft = ComposeColor(0xFFA97A4D)
+private val WoodEspressoInk = ComposeColor(0xFF2B1A0E)
+private val WoodMutedInk = ComposeColor(0xFF5A3D24)
+private val WoodCardSurface = ComposeColor(0xFFF3E2C7)
+private val WoodCardElevated = ComposeColor(0xFFFAF0DF)
+private val WoodAccentWalnut = ComposeColor(0xFF6B3E1E)
 
 enum class LibraryViewMode {
     GRID_3, GRID_2, LIST
@@ -206,29 +221,92 @@ data class ExportedScanResult(
     val bookItem: BookItem? = null
 )
 
-private val ReadEraDarkScheme = darkColorScheme(
-    primary = ComposeColor(0xFF4BA3E3),
-    onPrimary = ComposeColor(0xFF07131A),
-    background = ComposeColor(0xFF0E1A21),
-    onBackground = ComposeColor(0xFFE6EEF3),
-    surface = ComposeColor(0xFF13232C),
-    onSurface = ComposeColor(0xFFE6EEF3),
-    surfaceVariant = ComposeColor(0xFF1C313D),
-    onSurfaceVariant = ComposeColor(0xFF9EB2BE),
-    error = ComposeColor(0xFFFF6B6B)
+private val WoodyLightScheme = lightColorScheme(
+    primary = WoodAccentWalnut,
+    onPrimary = ComposeColor(0xFFFFF8EE),
+    background = WoodLightBase,
+    onBackground = WoodEspressoInk,
+    surface = WoodCardSurface,
+    onSurface = WoodEspressoInk,
+    surfaceVariant = WoodLightWarm,
+    onSurfaceVariant = WoodMutedInk,
+    error = ComposeColor(0xFF9E2A22)
 )
 
-private val ReadEraLightScheme = lightColorScheme(
-    primary = ComposeColor(0xFF1A6FA8),
-    onPrimary = ComposeColor(0xFFFFFFFF),
-    background = ComposeColor(0xFFF2F5F7),
-    onBackground = ComposeColor(0xFF132028),
-    surface = ComposeColor(0xFFFFFFFF),
-    onSurface = ComposeColor(0xFF132028),
-    surfaceVariant = ComposeColor(0xFFE1E8ED),
-    onSurfaceVariant = ComposeColor(0xFF4A5C68),
-    error = ComposeColor(0xFFB3261E)
+private val WoodyWarmScheme = darkColorScheme(
+    primary = WoodAccentWalnut,
+    onPrimary = ComposeColor(0xFFFFF8EE),
+    background = WoodLightBase,
+    onBackground = WoodEspressoInk,
+    surface = WoodCardSurface,
+    onSurface = WoodEspressoInk,
+    surfaceVariant = WoodLightWarm,
+    onSurfaceVariant = WoodMutedInk,
+    error = ComposeColor(0xFF9E2A22)
 )
+
+@Composable
+private fun WoodGrainBackground(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.background(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    WoodLightBase,
+                    WoodLightWarm,
+                    WoodLightBase,
+                    WoodLightWarm
+                )
+            )
+        )
+    ) {
+        ComposeCanvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+            val plankCount = 9
+            val plankH = h / plankCount
+
+            for (p in 0 until plankCount) {
+                val topY = p * plankH
+                val phase = p * 1.35f
+
+                // Subtle wood fiber wave lines inside each plank
+                val fiberCount = 7
+                for (f in 0 until fiberCount) {
+                    val baseOffset = topY + plankH * ((f + 0.5f) / fiberCount)
+                    val path = Path()
+                    val steps = 28
+                    for (s in 0..steps) {
+                        val x = (w * s) / steps
+                        val wave = sin((x / w) * 6.283f + phase + f * 0.7f) * (plankH * 0.045f)
+                        val y = baseOffset + wave
+                        if (s == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    }
+                    drawPath(
+                        path = path,
+                        color = if (f % 2 == 0) WoodGrainSoft.copy(alpha = 0.24f) else WoodGrainDark.copy(alpha = 0.14f),
+                        style = Stroke(width = if (f % 3 == 0) 2.2f else 1.2f, cap = StrokeCap.Round)
+                    )
+                }
+
+                // Plank seam with soft highlight & shadow for tactile woodwork feel
+                if (p > 0) {
+                    drawLine(
+                        color = WoodGrainDark.copy(alpha = 0.34f),
+                        start = Offset(0f, topY),
+                        end = Offset(w, topY),
+                        strokeWidth = 2.0f
+                    )
+                    drawLine(
+                        color = WoodCardElevated.copy(alpha = 0.35f),
+                        start = Offset(0f, topY + 2.2f),
+                        end = Offset(w, topY + 2.2f),
+                        strokeWidth = 1.4f
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun ReadEraGraphicIcon(
@@ -380,14 +458,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            var isDarkTheme by remember { mutableStateOf(true) }
+            var isDarkTheme by remember { mutableStateOf(false) }
 
             MaterialTheme(
-                colorScheme = if (isDarkTheme) ReadEraDarkScheme else ReadEraLightScheme
+                colorScheme = if (isDarkTheme) WoodyWarmScheme else WoodyLightScheme
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color = WoodLightBase
                 ) {
                     val context = LocalContext.current
                     val scope = rememberCoroutineScope()
@@ -726,483 +804,572 @@ class MainActivity : ComponentActivity() {
                             scanPages = scanPages.mapIndexed { i, p -> if (i == idx) transform(p) else p }
                         }
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp, vertical = 22.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            WoodGrainBackground(modifier = Modifier.fillMaxSize())
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .statusBarsPadding()
+                                    .navigationBarsPadding()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(horizontal = 18.dp, vertical = 28.dp)
                             ) {
-                                OutlinedButton(onClick = { showDocScanner = false }) {
-                                    Text("Shelf", maxLines = 1, softWrap = false)
-                                }
-                                Text(
-                                    text = "e-Bookish Scan Studio",
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            OutlinedTextField(
-                                value = docTitle,
-                                onValueChange = { docTitle = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Document Name") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = { cameraSnapLauncher.launch(null) },
-                                    enabled = !isProcessingDoc,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Camera", maxLines = 1, softWrap = false)
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        galleryPickerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                        )
-                                    },
-                                    enabled = !isProcessingDoc,
-                                    modifier = Modifier.weight(1.3f)
-                                ) {
-                                    Text("Gallery Photos", maxLines = 1, softWrap = false)
-                                }
-                            }
-
-                            if (scanPages.isNotEmpty()) {
-                                val safeIdx = selectedIndex.coerceIn(0, scanPages.lastIndex)
-                                val currentPage = scanPages[safeIdx]
-                                val livePreviewBmp = remember(currentPage) { currentPage.renderEdited() }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = WoodCardElevated.copy(alpha = 0.94f),
+                                    border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.35f)),
+                                    shadowElevation = 6.dp,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    items(scanPages.indices.toList()) { idx ->
-                                        OutlinedButton(onClick = { selectedIndex = idx }) {
-                                            Text(
-                                                text = if (idx == safeIdx) "Page ${idx + 1} ✓" else "Page ${idx + 1}",
-                                                maxLines = 1,
-                                                softWrap = false
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                Text(
-                                    text = "Filter (Page ${safeIdx + 1})",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    items(ScanFilterMode.entries) { mode ->
-                                        val isSel = currentPage.filter == mode
-                                        OutlinedButton(
-                                            onClick = {
-                                                defaultFilter = mode
-                                                updateSelectedPage { it.copy(filter = mode) }
-                                            }
-                                        ) {
-                                            Text(
-                                                text = if (isSel) "${mode.label} ✓" else mode.label,
-                                                maxLines = 1,
-                                                softWrap = false
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                Card(
-                                    shape = RoundedCornerShape(12.dp),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(230.dp)
-                                ) {
-                                    Column(modifier = Modifier.padding(8.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Live Cut Preview • Page ${safeIdx + 1}",
-                                                style = MaterialTheme.typography.labelLarge
-                                            )
-                                            Text(
-                                                text = "Delete Page",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.clickable {
-                                                    val nextList = scanPages.filterIndexed { i, _ -> i != safeIdx }
-                                                    scanPages = nextList
-                                                    selectedIndex = 0
-                                                }
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Image(
-                                            bitmap = livePreviewBmp.asImageBitmap(),
-                                            contentDescription = "Live Cut Page Preview",
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp)),
-                                            contentScale = ContentScale.Fit
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Live Side Cut Controls",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    OutlinedButton(
-                                        onClick = { updateSelectedPage { it.copy(crop = SideCrop()) } }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        Text("Reset Sides", maxLines = 1, softWrap = false)
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Left: ${(currentPage.crop.left * 100).toInt()}%",
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         OutlinedButton(
-                                            onClick = {
-                                                val v = (currentPage.crop.left - 0.05f).coerceIn(0f, 0.4f)
-                                                updateSelectedPage { it.copy(crop = it.crop.copy(left = v)) }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                            onClick = { showDocScanner = false },
+                                            border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.55f)),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = WoodCardSurface,
+                                                contentColor = WoodEspressoInk
+                                            )
                                         ) {
-                                            Text("L -", maxLines = 1, softWrap = false)
+                                            Text("← Shelf", maxLines = 1, softWrap = false, fontWeight = FontWeight.SemiBold)
                                         }
-                                        OutlinedButton(
-                                            onClick = {
-                                                val v = (currentPage.crop.left + 0.05f).coerceIn(0f, 0.4f)
-                                                updateSelectedPage { it.copy(crop = it.crop.copy(left = v)) }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("L +", maxLines = 1, softWrap = false)
-                                        }
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Right: ${(currentPage.crop.right * 100).toInt()}%",
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                val v = (currentPage.crop.right - 0.05f).coerceIn(0f, 0.4f)
-                                                updateSelectedPage { it.copy(crop = it.crop.copy(right = v)) }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("R -", maxLines = 1, softWrap = false)
-                                        }
-                                        OutlinedButton(
-                                            onClick = {
-                                                val v = (currentPage.crop.right + 0.05f).coerceIn(0f, 0.4f)
-                                                updateSelectedPage { it.copy(crop = it.crop.copy(right = v)) }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("R +", maxLines = 1, softWrap = false)
-                                        }
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Top: ${(currentPage.crop.top * 100).toInt()}%",
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                val v = (currentPage.crop.top - 0.05f).coerceIn(0f, 0.4f)
-                                                updateSelectedPage { it.copy(crop = it.crop.copy(top = v)) }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("T -", maxLines = 1, softWrap = false)
-                                        }
-                                        OutlinedButton(
-                                            onClick = {
-                                                val v = (currentPage.crop.top + 0.05f).coerceIn(0f, 0.4f)
-                                                updateSelectedPage { it.copy(crop = it.crop.copy(top = v)) }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("T +", maxLines = 1, softWrap = false)
-                                        }
-                                    }
-                                }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Bottom: ${(currentPage.crop.bottom * 100).toInt()}%",
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                val v = (currentPage.crop.bottom - 0.05f).coerceIn(0f, 0.4f)
-                                                updateSelectedPage { it.copy(crop = it.crop.copy(bottom = v)) }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("B -", maxLines = 1, softWrap = false)
-                                        }
-                                        OutlinedButton(
-                                            onClick = {
-                                                val v = (currentPage.crop.bottom + 0.05f).coerceIn(0f, 0.4f)
-                                                updateSelectedPage { it.copy(crop = it.crop.copy(bottom = v)) }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("B +", maxLines = 1, softWrap = false)
-                                        }
-                                    }
-                                }
-                            } else {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(170.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "Tap 'Gallery Photos' to pick from your phone gallery or 'Camera' to snap a page.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        modifier = Modifier.padding(16.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = {
-                                        if (scanPages.isEmpty()) {
-                                            docStatus = "Pick or snap at least 1 page first."
-                                        } else {
-                                            isProcessingDoc = true
-                                            docStatus = "Generating PDF..."
-                                            val renderedList = scanPages.map { it.renderEdited() }
-                                            val cleanName = sanitizeFileName(docTitle)
-                                            Thread {
-                                                val savedUri = savePagesAsPdf(context, cleanName, renderedList)
-                                                runOnUiThread {
-                                                    isProcessingDoc = false
-                                                    if (savedUri != null) {
-                                                        val thumb = renderSinglePage(context, savedUri, 0, 0.5f)
-                                                        val book = BookItem(
-                                                            uriString = savedUri.toString(),
-                                                            title = cleanName,
-                                                            format = "PDF",
-                                                            pageCount = renderedList.size,
-                                                            lastPage = 0,
-                                                            isFavorite = false,
-                                                            isTrashed = false,
-                                                            author = "Scanned Doc",
-                                                            collection = "Scans",
-                                                            cover = thumb,
-                                                            metadataLoaded = true
-                                                        )
-                                                        addBookToShelf(book)
-                                                        lastExported = ExportedScanResult(
-                                                            title = cleanName,
-                                                            format = "PDF",
-                                                            uris = listOf(savedUri),
-                                                            bookItem = book
-                                                        )
-                                                        docStatus = "Saved PDF: $cleanName.pdf (added to Shelf)"
-                                                    } else {
-                                                        docStatus = "Could not create PDF."
-                                                    }
-                                                }
-                                            }.start()
-                                        }
-                                    },
-                                    enabled = !isProcessingDoc && scanPages.isNotEmpty(),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Save PDF", maxLines = 1, softWrap = false)
-                                }
-
-                                Button(
-                                    onClick = {
-                                        if (scanPages.isEmpty()) {
-                                            docStatus = "Pick or snap at least 1 page first."
-                                        } else {
-                                            isProcessingDoc = true
-                                            docStatus = "Saving JPEG(s)..."
-                                            val renderedList = scanPages.map { it.renderEdited() }
-                                            val cleanName = sanitizeFileName(docTitle)
-                                            Thread {
-                                                val savedUris = savePagesAsJpegsWithUris(context, cleanName, renderedList)
-                                                runOnUiThread {
-                                                    isProcessingDoc = false
-                                                    if (savedUris.isNotEmpty()) {
-                                                        lastExported = ExportedScanResult(
-                                                            title = cleanName,
-                                                            format = "JPEG",
-                                                            uris = savedUris,
-                                                            bookItem = null
-                                                        )
-                                                        docStatus = "Saved ${savedUris.size} JPEG file(s)!"
-                                                    } else {
-                                                        docStatus = "Could not save JPEG."
-                                                    }
-                                                }
-                                            }.start()
-                                        }
-                                    },
-                                    enabled = !isProcessingDoc && scanPages.isNotEmpty(),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Save JPEG", maxLines = 1, softWrap = false)
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        scanPages = listOf()
-                                        selectedIndex = 0
-                                        lastExported = null
-                                        docStatus = "Cleared."
-                                    },
-                                    enabled = !isProcessingDoc && (scanPages.isNotEmpty() || lastExported != null)
-                                ) {
-                                    Text("Clear", maxLines = 1, softWrap = false)
-                                }
-                            }
-
-                            if (docStatus.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = docStatus,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-
-                            val exported = lastExported
-                            if (exported != null && exported.uris.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Card(
-                                    shape = RoundedCornerShape(12.dp),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
                                         Text(
-                                            text = "Scanned ${exported.format}: ${exported.title}",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
+                                            text = "e-Bookish Scan Studio",
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = WoodEspressoInk,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
                                         )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Button(
-                                                onClick = { shareExportedScan(context, exported) },
-                                                modifier = Modifier.weight(1f)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                OutlinedTextField(
+                                    value = docTitle,
+                                    onValueChange = { docTitle = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("Document Name", color = WoodMutedInk) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = WoodCardElevated.copy(alpha = 0.95f),
+                                        unfocusedContainerColor = WoodCardSurface.copy(alpha = 0.92f),
+                                        focusedBorderColor = WoodAccentWalnut,
+                                        unfocusedBorderColor = WoodGrainDark.copy(alpha = 0.45f),
+                                        focusedTextColor = WoodEspressoInk,
+                                        unfocusedTextColor = WoodEspressoInk
+                                    )
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Button(
+                                        onClick = { cameraSnapLauncher.launch(null) },
+                                        enabled = !isProcessingDoc,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = WoodAccentWalnut,
+                                            contentColor = ComposeColor(0xFFFFF8EE)
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Camera", maxLines = 1, softWrap = false)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            galleryPickerLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                            )
+                                        },
+                                        enabled = !isProcessingDoc,
+                                        border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.55f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = WoodCardElevated.copy(alpha = 0.92f),
+                                            contentColor = WoodEspressoInk
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.weight(1.3f)
+                                    ) {
+                                        Text("Gallery Photos", maxLines = 1, softWrap = false)
+                                    }
+                                }
+
+                                if (scanPages.isNotEmpty()) {
+                                    val safeIdx = selectedIndex.coerceIn(0, scanPages.lastIndex)
+                                    val currentPage = scanPages[safeIdx]
+                                    val livePreviewBmp = remember(currentPage) { currentPage.renderEdited() }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(scanPages.indices.toList()) { idx ->
+                                            OutlinedButton(
+                                                onClick = { selectedIndex = idx },
+                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = if (idx == safeIdx) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
+                                                    contentColor = WoodEspressoInk
+                                                )
                                             ) {
-                                                Text("Share", maxLines = 1, softWrap = false)
+                                                Text(
+                                                    text = if (idx == safeIdx) "Page ${idx + 1} ✓" else "Page ${idx + 1}",
+                                                    maxLines = 1,
+                                                    softWrap = false
+                                                )
                                             }
-                                            if (exported.bookItem != null) {
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Text(
+                                        text = "Filter (Page ${safeIdx + 1})",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = WoodEspressoInk
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(ScanFilterMode.entries) { mode ->
+                                            val isSel = currentPage.filter == mode
+                                            OutlinedButton(
+                                                onClick = {
+                                                    defaultFilter = mode
+                                                    updateSelectedPage { it.copy(filter = mode) }
+                                                },
+                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = if (isSel) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
+                                                    contentColor = WoodEspressoInk
+                                                )
+                                            ) {
+                                                Text(
+                                                    text = if (isSel) "${mode.label} ✓" else mode.label,
+                                                    maxLines = 1,
+                                                    softWrap = false
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Card(
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.95f)),
+                                        border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.35f)),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(230.dp)
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Live Cut Preview • Page ${safeIdx + 1}",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    color = WoodEspressoInk
+                                                )
+                                                Text(
+                                                    text = "Delete Page",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.clickable {
+                                                        val nextList = scanPages.filterIndexed { i, _ -> i != safeIdx }
+                                                        scanPages = nextList
+                                                        selectedIndex = 0
+                                                    }
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Image(
+                                                bitmap = livePreviewBmp.asImageBitmap(),
+                                                contentDescription = "Live Cut Page Preview",
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp)),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Card(
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = CardDefaults.cardColors(containerColor = WoodCardSurface.copy(alpha = 0.94f)),
+                                        border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.3f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Live Side Cut Controls",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = WoodEspressoInk
+                                                )
+                                                OutlinedButton(
+                                                    onClick = { updateSelectedPage { it.copy(crop = SideCrop()) } },
+                                                    border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f))
+                                                ) {
+                                                    Text("Reset Sides", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                }
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("Left: ${(currentPage.crop.left * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = WoodEspressoInk)
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val v = (currentPage.crop.left - 0.05f).coerceIn(0f, 0.4f)
+                                                            updateSelectedPage { it.copy(crop = it.crop.copy(left = v)) }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("L -", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    }
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val v = (currentPage.crop.left + 0.05f).coerceIn(0f, 0.4f)
+                                                            updateSelectedPage { it.copy(crop = it.crop.copy(left = v)) }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("L +", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    }
+                                                }
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("Right: ${(currentPage.crop.right * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = WoodEspressoInk)
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val v = (currentPage.crop.right - 0.05f).coerceIn(0f, 0.4f)
+                                                            updateSelectedPage { it.copy(crop = it.crop.copy(right = v)) }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("R -", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    }
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val v = (currentPage.crop.right + 0.05f).coerceIn(0f, 0.4f)
+                                                            updateSelectedPage { it.copy(crop = it.crop.copy(right = v)) }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("R +", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    }
+                                                }
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("Top: ${(currentPage.crop.top * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = WoodEspressoInk)
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val v = (currentPage.crop.top - 0.05f).coerceIn(0f, 0.4f)
+                                                            updateSelectedPage { it.copy(crop = it.crop.copy(top = v)) }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("T -", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    }
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val v = (currentPage.crop.top + 0.05f).coerceIn(0f, 0.4f)
+                                                            updateSelectedPage { it.copy(crop = it.crop.copy(top = v)) }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("T +", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    }
+                                                }
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("Bottom: ${(currentPage.crop.bottom * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = WoodEspressoInk)
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val v = (currentPage.crop.bottom - 0.05f).coerceIn(0f, 0.4f)
+                                                            updateSelectedPage { it.copy(crop = it.crop.copy(bottom = v)) }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("B -", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    }
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val v = (currentPage.crop.bottom + 0.05f).coerceIn(0f, 0.4f)
+                                                            updateSelectedPage { it.copy(crop = it.crop.copy(bottom = v)) }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("B +", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Spacer(modifier = Modifier.height(18.dp))
+                                    Card(
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.92f)),
+                                        border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.35f)),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(175.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "Tap 'Gallery Photos' to pick from your phone gallery or 'Camera' to snap a page.",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = WoodEspressoInk,
+                                                modifier = Modifier.padding(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            if (scanPages.isEmpty()) {
+                                                docStatus = "Pick or snap at least 1 page first."
+                                            } else {
+                                                isProcessingDoc = true
+                                                docStatus = "Generating PDF..."
+                                                val renderedList = scanPages.map { it.renderEdited() }
+                                                val cleanName = sanitizeFileName(docTitle)
+                                                Thread {
+                                                    val savedUri = savePagesAsPdf(context, cleanName, renderedList)
+                                                    runOnUiThread {
+                                                        isProcessingDoc = false
+                                                        if (savedUri != null) {
+                                                            val thumb = renderSinglePage(context, savedUri, 0, 0.5f)
+                                                            val book = BookItem(
+                                                                uriString = savedUri.toString(),
+                                                                title = cleanName,
+                                                                format = "PDF",
+                                                                pageCount = renderedList.size,
+                                                                lastPage = 0,
+                                                                isFavorite = false,
+                                                                isTrashed = false,
+                                                                author = "Scanned Doc",
+                                                                collection = "Scans",
+                                                                cover = thumb,
+                                                                metadataLoaded = true
+                                                            )
+                                                            addBookToShelf(book)
+                                                            lastExported = ExportedScanResult(
+                                                                title = cleanName,
+                                                                format = "PDF",
+                                                                uris = listOf(savedUri),
+                                                                bookItem = book
+                                                            )
+                                                            docStatus = "Saved PDF: $cleanName.pdf (added to Shelf)"
+                                                        } else {
+                                                            docStatus = "Could not create PDF."
+                                                        }
+                                                    }
+                                                }.start()
+                                            }
+                                        },
+                                        enabled = !isProcessingDoc && scanPages.isNotEmpty(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = WoodAccentWalnut,
+                                            contentColor = ComposeColor(0xFFFFF8EE)
+                                        ),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Save PDF", maxLines = 1, softWrap = false)
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            if (scanPages.isEmpty()) {
+                                                docStatus = "Pick or snap at least 1 page first."
+                                            } else {
+                                                isProcessingDoc = true
+                                                docStatus = "Saving JPEG(s)..."
+                                                val renderedList = scanPages.map { it.renderEdited() }
+                                                val cleanName = sanitizeFileName(docTitle)
+                                                Thread {
+                                                    val savedUris = savePagesAsJpegsWithUris(context, cleanName, renderedList)
+                                                    runOnUiThread {
+                                                        isProcessingDoc = false
+                                                        if (savedUris.isNotEmpty()) {
+                                                            lastExported = ExportedScanResult(
+                                                                title = cleanName,
+                                                                format = "JPEG",
+                                                                uris = savedUris,
+                                                                bookItem = null
+                                                            )
+                                                            docStatus = "Saved ${savedUris.size} JPEG file(s)!"
+                                                        } else {
+                                                            docStatus = "Could not save JPEG."
+                                                        }
+                                                    }
+                                                }.start()
+                                            }
+                                        },
+                                        enabled = !isProcessingDoc && scanPages.isNotEmpty(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = WoodAccentWalnut,
+                                            contentColor = ComposeColor(0xFFFFF8EE)
+                                        ),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Save JPEG", maxLines = 1, softWrap = false)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            scanPages = listOf()
+                                            selectedIndex = 0
+                                            lastExported = null
+                                            docStatus = "Cleared."
+                                        },
+                                        enabled = !isProcessingDoc && (scanPages.isNotEmpty() || lastExported != null),
+                                        border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = WoodCardElevated.copy(alpha = 0.9f),
+                                            contentColor = WoodEspressoInk
+                                        )
+                                    ) {
+                                        Text("Clear", maxLines = 1, softWrap = false)
+                                    }
+                                }
+
+                                if (docStatus.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = docStatus,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium,
+                                        color = WoodEspressoInk
+                                    )
+                                }
+
+                                val exported = lastExported
+                                if (exported != null && exported.uris.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Card(
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(14.dp)) {
+                                            Text(
+                                                text = "Scanned ${exported.format}: ${exported.title}",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = WoodEspressoInk
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Button(
+                                                    onClick = { shareExportedScan(context, exported) },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = WoodAccentWalnut,
+                                                        contentColor = ComposeColor(0xFFFFF8EE)
+                                                    ),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Text("Share", maxLines = 1, softWrap = false)
+                                                }
+                                                if (exported.bookItem != null) {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val b = exported.bookItem
+                                                            showDocScanner = false
+                                                            openBook(b)
+                                                        },
+                                                        modifier = Modifier.weight(1f)
+                                                    ) {
+                                                        Text("Read PDF", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    }
+                                                }
                                                 OutlinedButton(
                                                     onClick = {
-                                                        val b = exported.bookItem
+                                                        lastExported = null
                                                         showDocScanner = false
-                                                        openBook(b)
                                                     },
                                                     modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text("Read PDF", maxLines = 1, softWrap = false)
+                                                    Text("Done", maxLines = 1, softWrap = false, color = WoodEspressoInk)
                                                 }
-                                            }
-                                            OutlinedButton(
-                                                onClick = {
-                                                    lastExported = null
-                                                    showDocScanner = false
-                                                },
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Text("Done", maxLines = 1, softWrap = false)
                                             }
                                         }
                                     }
                                 }
-                            }
 
-                            Spacer(modifier = Modifier.height(24.dp))
+                                Spacer(modifier = Modifier.height(24.dp))
+                            }
                         }
                     } else if (activeBook != null) {
                         val currentBook = activeBook as BookItem
@@ -1637,7 +1804,7 @@ class MainActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.background)
+                                    .background(WoodLightBase)
                             ) {
                                 if (isLoadingReader) {
                                     Box(
@@ -1645,9 +1812,9 @@ class MainActivity : ComponentActivity() {
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            CircularProgressIndicator()
+                                            CircularProgressIndicator(color = WoodAccentWalnut)
                                             Spacer(modifier = Modifier.height(12.dp))
-                                            Text("Opening book...")
+                                            Text("Opening book...", color = WoodEspressoInk)
                                         }
                                     }
                                 } else if (readerPages.isEmpty()) {
@@ -1655,7 +1822,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("Could not open this PDF file.")
+                                        Text("Could not open this PDF file.", color = WoodEspressoInk)
                                     }
                                 } else {
                                     val maxIdx = readerPages.size - 1
@@ -1846,161 +2013,218 @@ class MainActivity : ComponentActivity() {
                         }
 
                         Box(modifier = Modifier.fillMaxSize()) {
+                            WoodGrainBackground(modifier = Modifier.fillMaxSize())
+
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 14.dp, vertical = 22.dp)
+                                    .statusBarsPadding()
+                                    .navigationBarsPadding()
+                                    .padding(horizontal = 18.dp, vertical = 28.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                // Lowered, spacious woody header bar with clear spacing between Menu, Title, and Overflow button
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = WoodCardElevated.copy(alpha = 0.94f),
+                                    border = BorderStroke(1.2.dp, WoodGrainDark.copy(alpha = 0.36f)),
+                                    shadowElevation = 6.dp,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        OutlinedButton(
-                                            onClick = { showDrawer = !showDrawer },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            modifier = Modifier.weight(1f)
                                         ) {
-                                            Text("Menu", maxLines = 1, softWrap = false)
+                                            OutlinedButton(
+                                                onClick = { showDrawer = !showDrawer },
+                                                shape = RoundedCornerShape(12.dp),
+                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.55f)),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = WoodCardSurface,
+                                                    contentColor = WoodEspressoInk
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                                            ) {
+                                                Text("☰ Menu", maxLines = 1, softWrap = false, fontWeight = FontWeight.SemiBold)
+                                            }
+
+                                            ReadEraGraphicIcon(
+                                                kind = "BOOKS",
+                                                tint = WoodAccentWalnut,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+
+                                            Text(
+                                                text = section.label,
+                                                style = MaterialTheme.typography.titleLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                color = WoodEspressoInk,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
 
-                                        ReadEraGraphicIcon(
-                                            kind = "BOOKS",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(24.dp)
-                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
 
-                                        Text(
-                                            text = section.label,
-                                            style = MaterialTheme.typography.titleLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
+                                        Box {
+                                            OutlinedButton(
+                                                onClick = { showOverflowMenu = true },
+                                                shape = RoundedCornerShape(12.dp),
+                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.55f)),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = WoodCardSurface,
+                                                    contentColor = WoodEspressoInk
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                            ) {
+                                                Text("⋮", maxLines = 1, softWrap = false, fontWeight = FontWeight.Bold)
+                                            }
 
-                                    Box {
-                                        OutlinedButton(
-                                            onClick = { showOverflowMenu = true },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                                        ) {
-                                            Text("⋮", maxLines = 1, softWrap = false)
-                                        }
-
-                                        DropdownMenu(
-                                            expanded = showOverflowMenu,
-                                            onDismissRequest = { showOverflowMenu = false }
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text("Import Books") },
-                                                onClick = {
-                                                    showOverflowMenu = false
-                                                    addBookLauncher.launch(
-                                                        arrayOf("application/pdf", "application/epub+zip", "*/*")
-                                                    )
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Scan Folder") },
-                                                onClick = {
-                                                    showOverflowMenu = false
-                                                    startFolderScan()
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Doc Scanner") },
-                                                onClick = {
-                                                    showOverflowMenu = false
-                                                    showDocScanner = true
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Open a random book") },
-                                                onClick = {
-                                                    showOverflowMenu = false
-                                                    if (activeBooks.isNotEmpty()) {
-                                                        openBook(activeBooks[Random.nextInt(activeBooks.size)])
-                                                    } else {
-                                                        scanNotice = "No active books to open."
+                                            DropdownMenu(
+                                                expanded = showOverflowMenu,
+                                                onDismissRequest = { showOverflowMenu = false },
+                                                containerColor = WoodCardElevated
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Import Books", color = WoodEspressoInk) },
+                                                    onClick = {
+                                                        showOverflowMenu = false
+                                                        addBookLauncher.launch(
+                                                            arrayOf("application/pdf", "application/epub+zip", "*/*")
+                                                        )
                                                     }
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Rebuild book covers") },
-                                                onClick = {
-                                                    showOverflowMenu = false
-                                                    rebuildAllCovers()
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(if (selectionMode) "Cancel selection" else "Select all")
-                                                },
-                                                onClick = {
-                                                    showOverflowMenu = false
-                                                    if (!selectionMode) {
-                                                        selectionMode = true
-                                                        selectedUris = sectionBaseList.map { it.uriString }.toSet()
-                                                    } else {
-                                                        selectionMode = false
-                                                        selectedUris = emptySet()
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("Scan Folder", color = WoodEspressoInk) },
+                                                    onClick = {
+                                                        showOverflowMenu = false
+                                                        startFolderScan()
                                                     }
-                                                }
-                                            )
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("Doc Scanner", color = WoodEspressoInk) },
+                                                    onClick = {
+                                                        showOverflowMenu = false
+                                                        showDocScanner = true
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("Open a random book", color = WoodEspressoInk) },
+                                                    onClick = {
+                                                        showOverflowMenu = false
+                                                        if (activeBooks.isNotEmpty()) {
+                                                            openBook(activeBooks[Random.nextInt(activeBooks.size)])
+                                                        } else {
+                                                            scanNotice = "No active books to open."
+                                                        }
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("Rebuild book covers", color = WoodEspressoInk) },
+                                                    onClick = {
+                                                        showOverflowMenu = false
+                                                        rebuildAllCovers()
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            text = if (selectionMode) "Cancel selection" else "Select all",
+                                                            color = WoodEspressoInk
+                                                        )
+                                                    },
+                                                    onClick = {
+                                                        showOverflowMenu = false
+                                                        if (!selectionMode) {
+                                                            selectionMode = true
+                                                            selectedUris = sectionBaseList.map { it.uriString }.toSet()
+                                                        } else {
+                                                            selectionMode = false
+                                                            selectedUris = emptySet()
+                                                        }
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
                                 }
 
                                 if (section == ReadEraSection.FORMATS) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         items(listOf("ALL", "PDF", "EPUB")) { fmt ->
-                                            OutlinedButton(onClick = { formatFilter = fmt }) {
+                                            OutlinedButton(
+                                                onClick = { formatFilter = fmt },
+                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = if (formatFilter == fmt) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
+                                                    contentColor = WoodEspressoInk
+                                                )
+                                            ) {
                                                 Text(if (formatFilter == fmt) "$fmt ✓" else fmt, maxLines = 1, softWrap = false)
                                             }
                                         }
                                     }
                                 } else if (section == ReadEraSection.AUTHORS) {
                                     val authorList = listOf("ALL") + activeBooks.map { it.author }.distinct()
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         items(authorList) { auth ->
-                                            OutlinedButton(onClick = { authorFilter = auth }) {
+                                            OutlinedButton(
+                                                onClick = { authorFilter = auth },
+                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = if (authorFilter == auth) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
+                                                    contentColor = WoodEspressoInk
+                                                )
+                                            ) {
                                                 Text(if (authorFilter == auth) "$auth ✓" else auth, maxLines = 1, softWrap = false)
                                             }
                                         }
                                     }
                                 } else if (section == ReadEraSection.COLLECTIONS) {
                                     val colList = listOf("ALL", "General", "Documents", "Ebooks", "Scans")
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         items(colList) { col ->
-                                            OutlinedButton(onClick = { collectionFilter = col }) {
+                                            OutlinedButton(
+                                                onClick = { collectionFilter = col },
+                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = if (collectionFilter == col) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
+                                                    contentColor = WoodEspressoInk
+                                                )
+                                            ) {
                                                 Text(if (collectionFilter == col) "$col ✓" else col, maxLines = 1, softWrap = false)
                                             }
                                         }
                                     }
                                 } else if (section == ReadEraSection.SETTINGS) {
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Spacer(modifier = Modifier.height(12.dp))
                                     Card(
-                                        shape = RoundedCornerShape(10.dp),
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.94f)),
+                                        border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.35f)),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Column(
-                                            modifier = Modifier.padding(12.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            Text("e-Bookish Reader & Library Settings", fontWeight = FontWeight.Bold)
+                                            Text("e-Bookish Reader & Library Settings", fontWeight = FontWeight.Bold, color = WoodEspressoInk)
                                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 OutlinedButton(onClick = { isDarkTheme = !isDarkTheme }) {
-                                                    Text(if (isDarkTheme) "Theme: Dark" else "Theme: Light", maxLines = 1, softWrap = false)
+                                                    Text(if (isDarkTheme) "Oak: Warm" else "Oak: Light", maxLines = 1, softWrap = false, color = WoodEspressoInk)
                                                 }
                                                 OutlinedButton(onClick = { useDefaultCovers = !useDefaultCovers }) {
-                                                    Text(if (useDefaultCovers) "Default Cover: ON" else "Default Cover: OFF", maxLines = 1, softWrap = false)
+                                                    Text(if (useDefaultCovers) "Default Cover: ON" else "Default Cover: OFF", maxLines = 1, softWrap = false, color = WoodEspressoInk)
                                                 }
                                             }
                                         }
@@ -2008,7 +2232,7 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 if (selectionMode) {
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Spacer(modifier = Modifier.height(10.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2017,6 +2241,7 @@ class MainActivity : ComponentActivity() {
                                         Text(
                                             text = "${selectedUris.size} selected",
                                             style = MaterialTheme.typography.labelLarge,
+                                            color = WoodEspressoInk,
                                             modifier = Modifier.weight(1f)
                                         )
                                         OutlinedButton(
@@ -2037,52 +2262,64 @@ class MainActivity : ComponentActivity() {
                                             Text(
                                                 text = if (section == ReadEraSection.TRASH) "Delete Forever" else "Move to Trash",
                                                 maxLines = 1,
-                                                softWrap = false
+                                                softWrap = false,
+                                                color = WoodEspressoInk
                                             )
                                         }
                                     }
                                 }
 
                                 if (scanNotice.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
                                     Text(
                                         text = scanNotice,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary
+                                        fontWeight = FontWeight.Medium,
+                                        color = WoodEspressoInk
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(14.dp))
 
                                 OutlinedTextField(
                                     value = searchQuery,
                                     onValueChange = { searchQuery = it },
                                     modifier = Modifier.fillMaxWidth(),
-                                    placeholder = { Text("Search in ${section.label}...", maxLines = 1) },
+                                    placeholder = { Text("Search in ${section.label}...", maxLines = 1, color = WoodMutedInk) },
                                     singleLine = true,
-                                    shape = RoundedCornerShape(10.dp)
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = WoodCardElevated.copy(alpha = 0.95f),
+                                        unfocusedContainerColor = WoodCardSurface.copy(alpha = 0.92f),
+                                        focusedBorderColor = WoodAccentWalnut,
+                                        unfocusedBorderColor = WoodGrainDark.copy(alpha = 0.45f),
+                                        focusedTextColor = WoodEspressoInk,
+                                        unfocusedTextColor = WoodEspressoInk
+                                    )
                                 )
 
-                                Spacer(modifier = Modifier.height(12.dp))
+                                Spacer(modifier = Modifier.height(18.dp))
 
                                 if (showAboutDialog) {
                                     Card(
-                                        shape = RoundedCornerShape(12.dp),
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated),
                                         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(bottom = 12.dp)
+                                            .padding(bottom = 14.dp)
                                     ) {
                                         Column(modifier = Modifier.padding(14.dp)) {
-                                            Text("e-Bookish", fontWeight = FontWeight.Bold)
+                                            Text("e-Bookish", fontWeight = FontWeight.Bold, color = WoodEspressoInk)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
                                                 text = "Includes Reading Now, Favorites, To Read, Have Read, Authors, Series, Collections, Formats, Folder Scanner, Trash & Restore, and Document Scanner.",
-                                                style = MaterialTheme.typography.bodySmall
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = WoodMutedInk
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
                                             OutlinedButton(onClick = { showAboutDialog = false }) {
-                                                Text("Close", maxLines = 1, softWrap = false)
+                                                Text("Close", maxLines = 1, softWrap = false, color = WoodEspressoInk)
                                             }
                                         }
                                     }
@@ -2093,20 +2330,42 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = if (section == ReadEraSection.TRASH) {
-                                                "Trash is empty."
-                                            } else if (activeBooks.isEmpty()) {
-                                                "No books yet.\nTap Menu -> Folders or Downloads to add PDFs and EPUBs."
-                                            } else {
-                                                "No books in '${section.label}'."
-                                            },
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
+                                        Card(
+                                            shape = RoundedCornerShape(18.dp),
+                                            colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.92f)),
+                                            border = BorderStroke(1.2.dp, WoodGrainDark.copy(alpha = 0.35f)),
+                                            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 8.dp)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(24.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally
+                                            ) {
+                                                ReadEraGraphicIcon(
+                                                    kind = "BOOKS",
+                                                    tint = WoodAccentWalnut,
+                                                    modifier = Modifier.size(36.dp)
+                                                )
+                                                Spacer(modifier = Modifier.height(12.dp))
+                                                Text(
+                                                    text = if (section == ReadEraSection.TRASH) {
+                                                        "Trash is empty."
+                                                    } else if (activeBooks.isEmpty()) {
+                                                        "No books yet.\nTap Menu -> Folders or Downloads to add PDFs and EPUBs."
+                                                    } else {
+                                                        "No books in '${section.label}'."
+                                                    },
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    color = WoodEspressoInk
+                                                )
+                                            }
+                                        }
                                     }
                                 } else if (viewMode == LibraryViewMode.LIST) {
                                     LazyColumn(
-                                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp),
                                         contentPadding = PaddingValues(bottom = 28.dp),
                                         modifier = Modifier.fillMaxSize()
                                     ) {
@@ -2128,13 +2387,15 @@ class MainActivity : ComponentActivity() {
                                                             openBook(book)
                                                         }
                                                     },
-                                                shape = RoundedCornerShape(10.dp),
-                                                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+                                                shape = RoundedCornerShape(14.dp),
+                                                colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.96f)),
+                                                border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.3f)),
+                                                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                                             ) {
                                                 Row(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .padding(12.dp),
+                                                        .padding(14.dp),
                                                     horizontalArrangement = Arrangement.SpaceBetween,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
@@ -2143,6 +2404,7 @@ class MainActivity : ComponentActivity() {
                                                             text = (if (book.isFavorite) "★ " else "") + book.title,
                                                             style = MaterialTheme.typography.bodyLarge,
                                                             fontWeight = FontWeight.SemiBold,
+                                                            color = WoodEspressoInk,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
                                                         )
@@ -2150,23 +2412,26 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "${book.format} • $percent% • ${book.pageCount}p",
                                                             style = MaterialTheme.typography.bodySmall,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            color = WoodMutedInk
                                                         )
                                                         Spacer(modifier = Modifier.height(6.dp))
                                                         LinearProgressIndicator(
                                                             progress = progress,
+                                                            color = WoodAccentWalnut,
+                                                            trackColor = WoodGrainDark.copy(alpha = 0.22f),
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(4.dp)
                                                                 .clip(RoundedCornerShape(2.dp))
                                                         )
                                                     }
-                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Spacer(modifier = Modifier.width(10.dp))
                                                     if (book.isTrashed) {
                                                         Text(
                                                             text = "Restore",
                                                             style = MaterialTheme.typography.labelMedium,
-                                                            color = MaterialTheme.colorScheme.primary,
+                                                            color = WoodAccentWalnut,
+                                                            fontWeight = FontWeight.Bold,
                                                             modifier = Modifier.clickable {
                                                                 val updated = books.map {
                                                                     if (it.uriString == book.uriString) it.copy(isTrashed = false) else it
@@ -2179,7 +2444,8 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = if (book.isFavorite) "Fav ✓" else "Fav",
                                                             style = MaterialTheme.typography.labelMedium,
-                                                            color = MaterialTheme.colorScheme.primary,
+                                                            color = WoodAccentWalnut,
+                                                            fontWeight = FontWeight.Bold,
                                                             modifier = Modifier.clickable {
                                                                 val updated = books.map {
                                                                     if (it.uriString == book.uriString) it.copy(isFavorite = !it.isFavorite) else it
@@ -2220,10 +2486,12 @@ class MainActivity : ComponentActivity() {
                                                             openBook(book)
                                                         }
                                                     },
-                                                shape = RoundedCornerShape(6.dp),
-                                                border = if (selectionMode && isChecked) {
-                                                    BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-                                                } else null,
+                                                shape = RoundedCornerShape(10.dp),
+                                                colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.96f)),
+                                                border = BorderStroke(
+                                                    width = if (selectionMode && isChecked) 2.dp else 1.dp,
+                                                    color = if (selectionMode && isChecked) WoodAccentWalnut else WoodGrainDark.copy(alpha = 0.32f)
+                                                ),
                                                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
                                             ) {
                                                 Column {
@@ -2231,7 +2499,7 @@ class MainActivity : ComponentActivity() {
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .aspectRatio(0.70f)
-                                                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                                                            .background(WoodCardSurface),
                                                         contentAlignment = Alignment.Center
                                                     ) {
                                                         val coverBmp = if (useDefaultCovers) null else book.cover
@@ -2250,12 +2518,14 @@ class MainActivity : ComponentActivity() {
                                                                 Text(
                                                                     text = book.format,
                                                                     style = MaterialTheme.typography.titleMedium,
-                                                                    fontWeight = FontWeight.Bold
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    color = WoodAccentWalnut
                                                                 )
                                                                 Spacer(modifier = Modifier.height(6.dp))
                                                                 Text(
                                                                     text = book.title,
                                                                     style = MaterialTheme.typography.bodySmall,
+                                                                    color = WoodEspressoInk,
                                                                     maxLines = 3,
                                                                     overflow = TextOverflow.Ellipsis
                                                                 )
@@ -2265,6 +2535,8 @@ class MainActivity : ComponentActivity() {
 
                                                     LinearProgressIndicator(
                                                         progress = progress,
+                                                        color = WoodAccentWalnut,
+                                                        trackColor = WoodGrainDark.copy(alpha = 0.2f),
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .height(3.dp)
@@ -2273,13 +2545,14 @@ class MainActivity : ComponentActivity() {
                                                     Row(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
-                                                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                                                            .padding(horizontal = 6.dp, vertical = 5.dp),
                                                         horizontalArrangement = Arrangement.SpaceBetween,
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         Text(
                                                             text = if (book.isFavorite) "★ $percent%" else "$percent%",
                                                             style = MaterialTheme.typography.labelSmall,
+                                                            color = WoodEspressoInk,
                                                             maxLines = 1,
                                                             softWrap = false,
                                                             modifier = Modifier.clickable {
@@ -2293,6 +2566,7 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = book.title,
                                                             style = MaterialTheme.typography.labelSmall,
+                                                            color = WoodEspressoInk,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis,
                                                             modifier = Modifier
@@ -2302,7 +2576,7 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = if (book.isTrashed) "Rest" else "Bin",
                                                             style = MaterialTheme.typography.labelSmall,
-                                                            color = if (book.isTrashed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                                            color = if (book.isTrashed) WoodAccentWalnut else MaterialTheme.colorScheme.error,
                                                             maxLines = 1,
                                                             softWrap = false,
                                                             modifier = Modifier.clickable {
@@ -2328,35 +2602,38 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .fillMaxWidth(0.78f)
                                             .fillMaxHeight(),
-                                        color = MaterialTheme.colorScheme.surface,
+                                        color = WoodCardElevated,
                                         shadowElevation = 14.dp
                                     ) {
                                         Column(
                                             modifier = Modifier
                                                 .fillMaxSize()
+                                                .statusBarsPadding()
+                                                .navigationBarsPadding()
                                                 .verticalScroll(rememberScrollState())
-                                                .padding(top = 24.dp, bottom = 18.dp)
+                                                .padding(top = 20.dp, bottom = 18.dp)
                                         ) {
                                             Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                                             ) {
                                                 ReadEraGraphicIcon(
                                                     kind = "BOOKS",
-                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    tint = WoodAccentWalnut,
                                                     modifier = Modifier.size(28.dp)
                                                 )
                                                 Text(
                                                     text = "e-Bookish",
                                                     style = MaterialTheme.typography.titleLarge,
-                                                    fontWeight = FontWeight.Bold
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = WoodEspressoInk
                                                 )
                                             }
 
-                                            HorizontalDivider()
+                                            HorizontalDivider(color = WoodGrainDark.copy(alpha = 0.25f))
 
                                             @Composable
                                             fun DrawerNavRow(
@@ -2365,12 +2642,12 @@ class MainActivity : ComponentActivity() {
                                                 active: Boolean = false,
                                                 onClick: () -> Unit
                                             ) {
-                                                val rowTint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                val rowTint = if (active) WoodAccentWalnut else WoodMutedInk
                                                 Row(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .background(
-                                                            if (active) MaterialTheme.colorScheme.surfaceVariant else ComposeColor.Transparent
+                                                            if (active) WoodCardSurface else ComposeColor.Transparent
                                                         )
                                                         .clickable { onClick() }
                                                         .padding(horizontal = 18.dp, vertical = 12.dp),
@@ -2382,7 +2659,7 @@ class MainActivity : ComponentActivity() {
                                                         text = label,
                                                         style = MaterialTheme.typography.bodyLarge,
                                                         fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                                                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                        color = if (active) WoodAccentWalnut else WoodEspressoInk,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
@@ -2444,7 +2721,7 @@ class MainActivity : ComponentActivity() {
                                                 showDrawer = false
                                             }
 
-                                            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                                            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = WoodGrainDark.copy(alpha = 0.25f))
 
                                             DrawerNavRow("Settings", "SETTINGS", section == ReadEraSection.SETTINGS) {
                                                 section = ReadEraSection.SETTINGS
@@ -2469,7 +2746,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxHeight()
-                                            .background(ComposeColor.Black.copy(alpha = 0.6f))
+                                            .background(WoodEspressoInk.copy(alpha = 0.45f))
                                             .clickable { showDrawer = false }
                                     )
                                 }
