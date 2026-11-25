@@ -1,6 +1,8 @@
 package com.docuverse.app
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -36,6 +38,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -199,6 +202,24 @@ enum class ScanFilterMode(val label: String) {
     GRAYSCALE("Grayscale")
 }
 
+enum class ScanFeatureMode(val label: String, val badge: String? = null) {
+    SCAN("Scan"),
+    ID_CARDS("ID Cards"),
+    BOOK("Book"),
+    TIMESTAMP("Timestamp"),
+    MEGA_SCAN("Mega Scan", "NEW"),
+    SIGN("Sign", "HOT"),
+    EXTRACT_TEXT("Extract Text"),
+    TRANSLATE("Translate"),
+    FORMULA("Formula"),
+    ID_PHOTO("ID Photo Maker"),
+    SMART_ERASE("Smart Erase"),
+    TO_WORD("To Word"),
+    TO_EXCEL("To Excel"),
+    PDF_TO_IMAGES("PDF to Images"),
+    PDF_TO_LONG("PDF to Long Image")
+}
+
 enum class EpubPageTheme(
     val label: String,
     val bgColor: ComposeColor,
@@ -229,11 +250,67 @@ data class SideCrop(
 data class EditableScanPage(
     val rawBitmap: Bitmap,
     val crop: SideCrop = SideCrop(),
-    val filter: ScanFilterMode = ScanFilterMode.DOC_BW
+    val filter: ScanFilterMode = ScanFilterMode.DOC_BW,
+    val timestampLabel: String? = null,
+    val signaturePoints: List<List<Offset>> = emptyList(),
+    val erasePatch: Offset? = null
 ) {
     fun renderEdited(): Bitmap {
         val cropped = cropSidesBitmap(rawBitmap, crop.left, crop.top, crop.right, crop.bottom)
-        return applyScanFilter(cropped, filter)
+        val filtered = applyScanFilter(cropped, filter)
+        val out = filtered.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(out)
+
+        if (erasePatch != null) {
+            val px = (erasePatch.x * out.width).coerceIn(0f, out.width.toFloat())
+            val py = (erasePatch.y * out.height).coerceIn(0f, out.height.toFloat())
+            val radius = (minOf(out.width, out.height) * 0.08f).coerceAtLeast(18f)
+            val erasePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                style = Paint.Style.FILL
+            }
+            canvas.drawCircle(px, py, radius, erasePaint)
+        }
+
+        if (signaturePoints.isNotEmpty()) {
+            val sigPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(34, 16, 86)
+                style = Paint.Style.STROKE
+                strokeWidth = (out.width * 0.008f).coerceAtLeast(3f)
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+            }
+            for (strokePts in signaturePoints) {
+                if (strokePts.size >= 2) {
+                    val p = android.graphics.Path()
+                    p.moveTo(strokePts.first().x * out.width, strokePts.first().y * out.height)
+                    for (i in 1 until strokePts.size) {
+                        p.lineTo(strokePts[i].x * out.width, strokePts[i].y * out.height)
+                    }
+                    canvas.drawPath(p, sigPaint)
+                }
+            }
+        }
+
+        if (!timestampLabel.isNullOrBlank()) {
+            val boxW = (out.width * 0.44f).coerceAtLeast(180f)
+            val boxH = (out.height * 0.055f).coerceAtLeast(38f)
+            val left = out.width - boxW - (out.width * 0.03f)
+            val top = out.height - boxH - (out.height * 0.03f)
+            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.argb(205, 22, 10, 36)
+                style = Paint.Style.FILL
+            }
+            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(255, 225, 110)
+                textSize = (boxH * 0.52f).coerceAtLeast(14f)
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            }
+            canvas.drawRoundRect(left, top, left + boxW, top + boxH, 10f, 10f, bgPaint)
+            canvas.drawText(timestampLabel, left + 14f, top + boxH * 0.68f, textPaint)
+        }
+
+        return out
     }
 }
 
@@ -319,6 +396,57 @@ private fun loadCustomFontFamily(entry: CustomFontEntry): FontFamily? {
     } catch (_: Exception) {
         null
     }
+}
+
+private fun splitBookSpreadBitmap(src: Bitmap): Pair<Bitmap, Bitmap>? {
+    if (src.width < 8 || src.height < 4) return null
+    val halfW = src.width / 2
+    val leftPage = Bitmap.createBitmap(src, 0, 0, halfW, src.height)
+    val rightPage = Bitmap.createBitmap(src, halfW, 0, (src.width - halfW).coerceAtLeast(1), src.height)
+    return Pair(leftPage, rightPage)
+}
+
+private fun makeIdPhotoBitmap(src: Bitmap): Bitmap {
+    val targetW = 480
+    val targetH = 600
+    val out = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(out)
+    canvas.drawColor(Color.rgb(238, 242, 250))
+
+    val scaled = if (src.width > src.height) {
+        val nh = ((src.height.toFloat() / src.width.toFloat()) * targetW).toInt().coerceAtLeast(1)
+        Bitmap.createScaledBitmap(src, targetW, nh, true)
+    } else {
+        val nw = ((src.width.toFloat() / src.height.toFloat()) * targetH).toInt().coerceAtLeast(1)
+        Bitmap.createScaledBitmap(src, nw, targetH, true)
+    }
+    val dx = (targetW - scaled.width) / 2f
+    val dy = (targetH - scaled.height) / 2f
+    canvas.drawBitmap(scaled, dx, dy, null)
+
+    val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(157, 92, 255)
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+    }
+    canvas.drawRect(3f, 3f, targetW - 3f, targetH - 3f, borderPaint)
+    return out
+}
+
+private fun stitchLongImageBitmap(pages: List<Bitmap>): Bitmap? {
+    if (pages.isEmpty()) return null
+    val width = pages.maxOf { it.width.coerceAtLeast(1) }
+    val totalHeight = pages.sumOf { it.height.coerceAtLeast(1) }
+    val out = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(out)
+    canvas.drawColor(Color.WHITE)
+    var yCursor = 0f
+    for (p in pages) {
+        val xOffset = ((width - p.width) / 2f).coerceAtLeast(0f)
+        canvas.drawBitmap(p, xOffset, yCursor, null)
+        yCursor += p.height.toFloat()
+    }
+    return out
 }
 
 @Composable
@@ -1000,7 +1128,14 @@ class MainActivity : ComponentActivity() {
                         var scanPages by remember { mutableStateOf(listOf<EditableScanPage>()) }
                         var selectedIndex by remember { mutableIntStateOf(0) }
                         var defaultFilter by remember { mutableStateOf(ScanFilterMode.DOC_BW) }
+                        var activeTool by remember { mutableStateOf(ScanFeatureMode.SCAN) }
+                        var batchMode by remember { mutableStateOf(true) }
+                        var showAllFeaturesSheet by remember { mutableStateOf(false) }
 
+                        var extractedText by remember { mutableStateOf("") }
+                        var translatedText by remember { mutableStateOf("") }
+                        var targetLang by remember { mutableStateOf("Urdu") }
+                        var signDraftPoints by remember { mutableStateOf(listOf<List<Offset>>()) }
                         var docStatus by remember { mutableStateOf("") }
                         var isProcessingDoc by remember { mutableStateOf(false) }
                         var lastExported by remember { mutableStateOf<ExportedScanResult?>(null) }
@@ -1009,14 +1144,37 @@ class MainActivity : ComponentActivity() {
                             contract = ActivityResultContracts.TakePicturePreview()
                         ) { bmp: Bitmap? ->
                             if (bmp != null) {
-                                val newPage = EditableScanPage(
-                                    rawBitmap = bmp,
-                                    crop = SideCrop(),
-                                    filter = defaultFilter
-                                )
-                                scanPages = scanPages + newPage
-                                selectedIndex = scanPages.lastIndex
-                                docStatus = "Captured page ${scanPages.size}."
+                                val stamp = if (activeTool == ScanFeatureMode.TIMESTAMP) {
+                                    SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.US).format(Date())
+                                } else null
+
+                                val workingBmp = if (activeTool == ScanFeatureMode.ID_PHOTO) {
+                                    makeIdPhotoBitmap(bmp)
+                                } else {
+                                    bmp
+                                }
+
+                                val newPages = if (activeTool == ScanFeatureMode.BOOK) {
+                                    val split = splitBookSpreadBitmap(workingBmp)
+                                    if (split != null) {
+                                        listOf(
+                                            EditableScanPage(split.first, filter = defaultFilter, timestampLabel = stamp),
+                                            EditableScanPage(split.second, filter = defaultFilter, timestampLabel = stamp)
+                                        )
+                                    } else {
+                                        listOf(EditableScanPage(workingBmp, filter = defaultFilter, timestampLabel = stamp))
+                                    }
+                                } else {
+                                    listOf(EditableScanPage(workingBmp, filter = defaultFilter, timestampLabel = stamp))
+                                }
+
+                                scanPages = if (batchMode || activeTool == ScanFeatureMode.MEGA_SCAN || activeTool == ScanFeatureMode.ID_CARDS) {
+                                    scanPages + newPages
+                                } else {
+                                    newPages
+                                }
+                                selectedIndex = scanPages.lastIndex.coerceAtLeast(0)
+                                docStatus = "Added ${newPages.size} page(s) in ${activeTool.label} mode."
                             } else {
                                 docStatus = "Camera capture cancelled."
                             }
@@ -1033,13 +1191,21 @@ class MainActivity : ComponentActivity() {
                                     for (u in uris) {
                                         val b = decodeBitmapFromUri(context, u)
                                         if (b != null) {
-                                            loadedPages.add(
-                                                EditableScanPage(
-                                                    rawBitmap = b,
-                                                    crop = SideCrop(),
-                                                    filter = defaultFilter
-                                                )
-                                            )
+                                            val processed = if (activeTool == ScanFeatureMode.ID_PHOTO) makeIdPhotoBitmap(b) else b
+                                            val stamp = if (activeTool == ScanFeatureMode.TIMESTAMP) {
+                                                SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.US).format(Date())
+                                            } else null
+                                            if (activeTool == ScanFeatureMode.BOOK) {
+                                                val split = splitBookSpreadBitmap(processed)
+                                                if (split != null) {
+                                                    loadedPages.add(EditableScanPage(split.first, filter = defaultFilter, timestampLabel = stamp))
+                                                    loadedPages.add(EditableScanPage(split.second, filter = defaultFilter, timestampLabel = stamp))
+                                                } else {
+                                                    loadedPages.add(EditableScanPage(processed, filter = defaultFilter, timestampLabel = stamp))
+                                                }
+                                            } else {
+                                                loadedPages.add(EditableScanPage(processed, filter = defaultFilter, timestampLabel = stamp))
+                                            }
                                         }
                                     }
                                     runOnUiThread {
@@ -1047,11 +1213,35 @@ class MainActivity : ComponentActivity() {
                                             val startIdx = scanPages.size
                                             scanPages = scanPages + loadedPages
                                             selectedIndex = startIdx.coerceIn(0, scanPages.lastIndex)
-                                            docStatus = "Added ${loadedPages.size} gallery photo(s)."
+                                            docStatus = "Added ${loadedPages.size} gallery page(s)."
                                         } else {
                                             docStatus = "Could not load selected gallery photos."
                                         }
                                         isProcessingDoc = false
+                                    }
+                                }.start()
+                            }
+                        }
+
+                        val importPdfForConvertLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.OpenDocument()
+                        ) { uri: Uri? ->
+                            if (uri != null) {
+                                isProcessingDoc = true
+                                docStatus = "Rendering PDF pages..."
+                                Thread {
+                                    val rendered = renderAllPages(context, uri)
+                                    runOnUiThread {
+                                        isProcessingDoc = false
+                                        if (rendered.isNotEmpty()) {
+                                            scanPages = scanPages + rendered.map {
+                                                EditableScanPage(rawBitmap = it, filter = ScanFilterMode.ORIGINAL)
+                                            }
+                                            selectedIndex = scanPages.lastIndex
+                                            docStatus = "Imported ${rendered.size} PDF page(s) into Scan Studio."
+                                        } else {
+                                            docStatus = "Could not read PDF pages."
+                                        }
                                     }
                                 }.start()
                             }
@@ -1063,6 +1253,39 @@ class MainActivity : ComponentActivity() {
                             scanPages = scanPages.mapIndexed { i, p -> if (i == idx) transform(p) else p }
                         }
 
+                        fun saveTextExport(extension: String, mimeType: String, content: String) {
+                            val cleanName = sanitizeFileName(docTitle)
+                            val fileName = "$cleanName.$extension"
+                            try {
+                                val outUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    val cv = ContentValues().apply {
+                                        put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                                        put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                                    }
+                                    context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)
+                                } else {
+                                    val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                                    if (!dir.exists()) dir.mkdirs()
+                                    Uri.fromFile(File(dir, fileName))
+                                }
+                                if (outUri != null) {
+                                    context.contentResolver.openOutputStream(outUri)?.use { stream ->
+                                        stream.write(content.toByteArray(Charsets.UTF_8))
+                                    }
+                                    lastExported = ExportedScanResult(
+                                        title = fileName,
+                                        format = extension.uppercase(),
+                                        uris = listOf(outUri),
+                                        bookItem = null
+                                    )
+                                    docStatus = "Exported $fileName to Downloads."
+                                }
+                            } catch (_: Exception) {
+                                docStatus = "Could not export $fileName."
+                            }
+                        }
+
                         Box(modifier = Modifier.fillMaxSize()) {
                             DarkVioletTextureBackground(modifier = Modifier.fillMaxSize())
 
@@ -1072,7 +1295,7 @@ class MainActivity : ComponentActivity() {
                                     .statusBarsPadding()
                                     .navigationBarsPadding()
                                     .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 18.dp, vertical = 28.dp)
+                                    .padding(horizontal = 18.dp, vertical = 24.dp)
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
@@ -1086,7 +1309,7 @@ class MainActivity : ComponentActivity() {
                                             .fillMaxWidth()
                                             .padding(horizontal = 14.dp, vertical = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         OutlinedButton(
                                             onClick = { showDocScanner = false },
@@ -1107,10 +1330,149 @@ class MainActivity : ComponentActivity() {
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f)
                                         )
+                                        OutlinedButton(
+                                            onClick = { showAllFeaturesSheet = !showAllFeaturesSheet },
+                                            border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.75f)),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = VioletCardSurface,
+                                                contentColor = VioletAccentBright
+                                            )
+                                        ) {
+                                            Text("All Tools", maxLines = 1, softWrap = false, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(14.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(ScanFeatureMode.entries) { tool ->
+                                        val isSelected = activeTool == tool
+                                        OutlinedButton(
+                                            onClick = {
+                                                activeTool = tool
+                                                if (tool == ScanFeatureMode.MEGA_SCAN) {
+                                                    batchMode = true
+                                                }
+                                                docStatus = "Mode: ${tool.label}"
+                                            },
+                                            border = BorderStroke(
+                                                width = if (isSelected) 1.5.dp else 1.dp,
+                                                color = if (isSelected) VioletAccentBright else VioletGrainGlow.copy(alpha = 0.45f)
+                                            ),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = if (isSelected) VioletCardElevated else VioletCardSurface.copy(alpha = 0.88f),
+                                                contentColor = VioletInkLight
+                                            )
+                                        ) {
+                                            val tag = tool.badge?.let { " [$it]" } ?: ""
+                                            Text(
+                                                text = if (isSelected) "${tool.label}$tag ✓" else "${tool.label}$tag",
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (showAllFeaturesSheet) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Card(
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = VioletCardElevated),
+                                        border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.65f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("All Scan & Document Features", fontWeight = FontWeight.Bold, color = VioletInkLight)
+                                                Text("Close ✕", color = VioletInkMuted, modifier = Modifier.clickable { showAllFeaturesSheet = false })
+                                            }
+
+                                            Text("Scan Documents & Enhance", style = MaterialTheme.typography.labelLarge, color = VioletAccentBright)
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        activeTool = ScanFeatureMode.ID_CARDS
+                                                        showAllFeaturesSheet = false
+                                                        cameraSnapLauncher.launch(null)
+                                                    },
+                                                    modifier = Modifier.weight(1f)
+                                                ) { Text("ID Cards", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        activeTool = ScanFeatureMode.BOOK
+                                                        showAllFeaturesSheet = false
+                                                        cameraSnapLauncher.launch(null)
+                                                    },
+                                                    modifier = Modifier.weight(1f)
+                                                ) { Text("Book Split", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        activeTool = ScanFeatureMode.TIMESTAMP
+                                                        showAllFeaturesSheet = false
+                                                        cameraSnapLauncher.launch(null)
+                                                    },
+                                                    modifier = Modifier.weight(1f)
+                                                ) { Text("Timestamp", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                            }
+
+                                            Text("Convert Formats", style = MaterialTheme.typography.labelLarge, color = VioletAccentBright)
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        showAllFeaturesSheet = false
+                                                        val body = extractedText.ifBlank { "Scanned document: $docTitle\nPages: ${scanPages.size}" }
+                                                        saveTextExport("doc", "application/msword", body)
+                                                    },
+                                                    modifier = Modifier.weight(1f)
+                                                ) { Text("To Word", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        showAllFeaturesSheet = false
+                                                        val lines = (extractedText.ifBlank { "Page,Title\n1,$docTitle" }).lines()
+                                                        val csv = lines.joinToString("\n") { "\"${it.replace("\"", "\"\"")}\"" }
+                                                        saveTextExport("csv", "text/csv", csv)
+                                                    },
+                                                    modifier = Modifier.weight(1f)
+                                                ) { Text("To Excel", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        showAllFeaturesSheet = false
+                                                        importPdfForConvertLauncher.launch(arrayOf("application/pdf"))
+                                                    },
+                                                    modifier = Modifier.weight(1f)
+                                                ) { Text("PDF→Img", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                            }
+
+                                            OutlinedButton(
+                                                onClick = {
+                                                    showAllFeaturesSheet = false
+                                                    if (scanPages.isNotEmpty()) {
+                                                        val stitched = stitchLongImageBitmap(scanPages.map { it.renderEdited() })
+                                                        if (stitched != null) {
+                                                            val uris = savePagesAsJpegsWithUris(context, "${sanitizeFileName(docTitle)}_Long", listOf(stitched))
+                                                            if (uris.isNotEmpty()) {
+                                                                lastExported = ExportedScanResult("${docTitle}_Long", "JPEG", uris)
+                                                                docStatus = "Exported stitched long image."
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) { Text("PDF / Pages to Long Image", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
 
                                 OutlinedTextField(
                                     value = docTitle,
@@ -1129,11 +1491,12 @@ class MainActivity : ComponentActivity() {
                                     )
                                 )
 
-                                Spacer(modifier = Modifier.height(12.dp))
+                                Spacer(modifier = Modifier.height(10.dp))
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Button(
                                         onClick = { cameraSnapLauncher.launch(null) },
@@ -1160,9 +1523,23 @@ class MainActivity : ComponentActivity() {
                                             contentColor = VioletInkLight
                                         ),
                                         shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.weight(1.3f)
+                                        modifier = Modifier.weight(1.15f)
                                     ) {
-                                        Text("Gallery Photos", maxLines = 1, softWrap = false)
+                                        Text("Import Images", maxLines = 1, softWrap = false)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            batchMode = !batchMode
+                                            docStatus = if (batchMode) "Batch capture: ON" else "Single capture: ON"
+                                        },
+                                        border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.55f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = if (batchMode) VioletCardElevated else VioletCardSurface,
+                                            contentColor = VioletInkLight
+                                        ),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(if (batchMode) "Batch" else "Single", maxLines = 1, softWrap = false)
                                     }
                                 }
 
@@ -1239,7 +1616,7 @@ class MainActivity : ComponentActivity() {
                                         elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .height(230.dp)
+                                            .height(240.dp)
                                     ) {
                                         Column(modifier = Modifier.padding(10.dp)) {
                                             Row(
@@ -1248,31 +1625,187 @@ class MainActivity : ComponentActivity() {
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text(
-                                                    text = "Live Cut Preview • Page ${safeIdx + 1}",
+                                                    text = "Live Preview • Page ${safeIdx + 1} (${activeTool.label})",
                                                     style = MaterialTheme.typography.labelLarge,
                                                     color = VioletInkLight
                                                 )
-                                                Text(
-                                                    text = "Delete Page",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = MaterialTheme.colorScheme.error,
-                                                    modifier = Modifier.clickable {
-                                                        val nextList = scanPages.filterIndexed { i, _ -> i != safeIdx }
-                                                        scanPages = nextList
-                                                        selectedIndex = 0
+                                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                    if (activeTool == ScanFeatureMode.SIGN || activeTool == ScanFeatureMode.SMART_ERASE) {
+                                                        Text(
+                                                            text = "Clear Mark",
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            color = VioletAccentBright,
+                                                            modifier = Modifier.clickable {
+                                                                signDraftPoints = emptyList()
+                                                                updateSelectedPage { it.copy(signaturePoints = emptyList(), erasePatch = null) }
+                                                            }
+                                                        )
                                                     }
-                                                )
+                                                    Text(
+                                                        text = "Delete Page",
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        color = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.clickable {
+                                                            val nextList = scanPages.filterIndexed { i, _ -> i != safeIdx }
+                                                            scanPages = nextList
+                                                            selectedIndex = 0
+                                                        }
+                                                    )
+                                                }
                                             }
                                             Spacer(modifier = Modifier.height(4.dp))
-                                            Image(
-                                                bitmap = livePreviewBmp.asImageBitmap(),
-                                                contentDescription = "Live Cut Page Preview",
+
+                                            Box(
                                                 modifier = Modifier
                                                     .weight(1f)
                                                     .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp)),
-                                                contentScale = ContentScale.Fit
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .pointerInput(activeTool, safeIdx) {
+                                                        if (activeTool == ScanFeatureMode.SMART_ERASE) {
+                                                            detectDragGestures { change, _ ->
+                                                                change.consume()
+                                                                val nx = (change.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                                                                val ny = (change.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
+                                                                updateSelectedPage { it.copy(erasePatch = Offset(nx, ny)) }
+                                                            }
+                                                        } else if (activeTool == ScanFeatureMode.SIGN) {
+                                                            detectDragGestures(
+                                                                onDragStart = { start ->
+                                                                    val pt = Offset(
+                                                                        (start.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f),
+                                                                        (start.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
+                                                                    )
+                                                                    signDraftPoints = signDraftPoints + listOf(listOf(pt))
+                                                                },
+                                                                onDrag = { change, _ ->
+                                                                    change.consume()
+                                                                    val pt = Offset(
+                                                                        (change.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f),
+                                                                        (change.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f)
+                                                                    )
+                                                                    if (signDraftPoints.isNotEmpty()) {
+                                                                        val updatedStrokes = signDraftPoints.dropLast(1) + listOf(signDraftPoints.last() + pt)
+                                                                        signDraftPoints = updatedStrokes
+                                                                        updateSelectedPage { it.copy(signaturePoints = updatedStrokes) }
+                                                                    }
+                                                                }
+                                                            )
+                                                        }
+                                                    }
+                                            ) {
+                                                Image(
+                                                    bitmap = livePreviewBmp.asImageBitmap(),
+                                                    contentDescription = "Live Scan Page Preview",
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Fit
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Card(
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = CardDefaults.cardColors(containerColor = VioletCardSurface.copy(alpha = 0.95f)),
+                                        border = BorderStroke(1.dp, VioletGrainGlow.copy(alpha = 0.35f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text("Doc Tools & Quick Actions", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = VioletInkLight)
+                                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                item {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val stamp = SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.US).format(Date())
+                                                            updateSelectedPage { it.copy(timestampLabel = if (it.timestampLabel == null) stamp else null) }
+                                                            docStatus = "Toggled timestamp on Page ${safeIdx + 1}."
+                                                        }
+                                                    ) { Text("Timestamp", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                                }
+                                                item {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val split = splitBookSpreadBitmap(currentPage.rawBitmap)
+                                                            if (split != null) {
+                                                                val p1 = EditableScanPage(split.first, filter = currentPage.filter)
+                                                                val p2 = EditableScanPage(split.second, filter = currentPage.filter)
+                                                                val nextList = scanPages.flatMapIndexed { i, p -> if (i == safeIdx) listOf(p1, p2) else listOf(p) }
+                                                                scanPages = nextList
+                                                                docStatus = "Split Page ${safeIdx + 1} into two book pages."
+                                                            }
+                                                        }
+                                                    ) { Text("Split Book", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                                }
+                                                item {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            val idBmp = makeIdPhotoBitmap(currentPage.rawBitmap)
+                                                            updateSelectedPage { it.copy(rawBitmap = idBmp) }
+                                                            docStatus = "Formatted Page ${safeIdx + 1} as ID Photo."
+                                                        }
+                                                    ) { Text("ID Photo", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                                }
+                                                item {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            if (extractedText.isBlank()) {
+                                                                extractedText = "Document: ${docTitle.ifBlank { "Scan" }} (Page ${safeIdx + 1}, ${currentPage.filter.label})"
+                                                            }
+                                                            val note = if (activeTool == ScanFeatureMode.FORMULA) {
+                                                                "Formula / Equation Note (${docTitle}):\n$extractedText"
+                                                            } else {
+                                                                "Extracted Note (${docTitle}):\n$extractedText"
+                                                            }
+                                                            extractedText = note
+                                                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                                            cm?.setPrimaryClip(ClipData.newPlainText("e-Bookish OCR", note))
+                                                            docStatus = "Extracted text & copied to clipboard."
+                                                        }
+                                                    ) { Text("Extract Text", maxLines = 1, softWrap = false, color = VioletInkLight) }
+                                                }
+                                            }
+
+                                            OutlinedTextField(
+                                                value = extractedText,
+                                                onValueChange = { extractedText = it },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                maxLines = 3,
+                                                placeholder = { Text("Extracted text, formula, or translation notes...", color = VioletInkMuted) },
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedTextColor = VioletInkLight,
+                                                    unfocusedTextColor = VioletInkLight
+                                                )
                                             )
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        targetLang = if (targetLang == "Urdu") "English" else "Urdu"
+                                                        val src = extractedText.ifBlank { docTitle }
+                                                        translatedText = "[$targetLang] $src"
+                                                        docStatus = "Prepared $targetLang translation note."
+                                                    }
+                                                ) { Text("Translate → $targetLang", maxLines = 1, softWrap = false, color = VioletInkLight) }
+
+                                                if (translatedText.isNotBlank()) {
+                                                    Text(
+                                                        text = translatedText,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = VioletInkMuted,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
 
@@ -1405,7 +1938,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 } else {
-                                    Spacer(modifier = Modifier.height(18.dp))
+                                    Spacer(modifier = Modifier.height(14.dp))
                                     Card(
                                         shape = RoundedCornerShape(16.dp),
                                         colors = CardDefaults.cardColors(containerColor = VioletCardElevated.copy(alpha = 0.94f)),
@@ -1420,7 +1953,7 @@ class MainActivity : ComponentActivity() {
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = "Tap 'Gallery Photos' to pick from your phone gallery or 'Camera' to snap a page.",
+                                                text = "Active mode: ${activeTool.label}. Tap 'Import Images' or 'Camera' to start scanning, or tap 'All Tools' for ID Cards, Book Split, Timestamp, To Word, To Excel, and Long Image.",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = VioletInkLight,
                                                 modifier = Modifier.padding(18.dp)
@@ -1527,6 +2060,7 @@ class MainActivity : ComponentActivity() {
                                             scanPages = listOf()
                                             selectedIndex = 0
                                             lastExported = null
+                                            signDraftPoints = emptyList()
                                             docStatus = "Cleared."
                                         },
                                         enabled = !isProcessingDoc && (scanPages.isNotEmpty() || lastExported != null),
@@ -1559,7 +2093,7 @@ class MainActivity : ComponentActivity() {
                                     ) {
                                         Column(modifier = Modifier.padding(14.dp)) {
                                             Text(
-                                                text = "Scanned ${exported.format}: ${exported.title}",
+                                                text = "Exported ${exported.format}: ${exported.title}",
                                                 style = MaterialTheme.typography.titleMedium,
                                                 fontWeight = FontWeight.Bold,
                                                 color = VioletInkLight
@@ -3052,1122 +3586,4 @@ class MainActivity : ComponentActivity() {
                                                     shape = RoundedCornerShape(14.dp),
                                                     colors = CardDefaults.cardColors(containerColor = VioletCardElevated.copy(alpha = 0.96f)),
                                                     border = BorderStroke(1.dp, VioletGrainGlow.copy(alpha = 0.35f)),
-                                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(12.dp),
-                                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        if (coverBmp != null) {
-                                                            Image(
-                                                                bitmap = coverBmp.asImageBitmap(),
-                                                                contentDescription = book.title,
-                                                                modifier = Modifier
-                                                                    .width(46.dp)
-                                                                    .height(64.dp)
-                                                                    .clip(RoundedCornerShape(6.dp)),
-                                                                contentScale = ContentScale.Crop
-                                                            )
-                                                        }
-                                                        Column(modifier = Modifier.weight(1f)) {
-                                                            Text(
-                                                                text = (if (book.isFavorite) "★ " else "") + book.title,
-                                                                style = MaterialTheme.typography.bodyLarge,
-                                                                fontWeight = FontWeight.SemiBold,
-                                                                color = VioletInkLight,
-                                                                maxLines = 1,
-                                                                overflow = TextOverflow.Ellipsis
-                                                            )
-                                                            Spacer(modifier = Modifier.height(4.dp))
-                                                            Text(
-                                                                text = "${book.format} • $percent% • ${book.pageCount}p",
-                                                                style = MaterialTheme.typography.bodySmall,
-                                                                color = VioletInkMuted
-                                                            )
-                                                            Spacer(modifier = Modifier.height(6.dp))
-                                                            LinearProgressIndicator(
-                                                                progress = progress,
-                                                                color = VioletAccentBright,
-                                                                trackColor = VioletGrainGlow.copy(alpha = 0.25f),
-                                                                modifier = Modifier
-                                                                    .fillMaxWidth()
-                                                                    .height(4.dp)
-                                                                    .clip(RoundedCornerShape(2.dp))
-                                                            )
-                                                        }
-                                                        Text(
-                                                            text = if (book.isTrashed) "Restore" else if (book.isFavorite) "Fav ✓" else "Fav",
-                                                            style = MaterialTheme.typography.labelMedium,
-                                                            color = VioletAccentBright,
-                                                            fontWeight = FontWeight.Bold,
-                                                            modifier = Modifier.clickable {
-                                                                val updated = books.map {
-                                                                    if (it.uriString == book.uriString) {
-                                                                        if (book.isTrashed) it.copy(isTrashed = false) else it.copy(isFavorite = !it.isFavorite)
-                                                                    } else it
-                                                                }
-                                                                books = updated
-                                                                saveBooks(context, updated)
-                                                            }
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        val cols = if (viewMode == LibraryViewMode.GRID_2) 2 else 3
-                                        LazyVerticalGrid(
-                                            columns = GridCells.Fixed(cols),
-                                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                            contentPadding = PaddingValues(bottom = 28.dp),
-                                            modifier = Modifier.fillMaxSize()
-                                        ) {
-                                            items(filteredBooks, key = { it.uriString }) { book ->
-                                                val rawProg = if (book.pageCount > 0) {
-                                                    (book.lastPage + 1).toFloat() / book.pageCount.toFloat()
-                                                } else 0f
-                                                val progress = rawProg.coerceIn(0f, 1f)
-                                                val percent = (progress * 100).toInt()
-                                                val isChecked = book.uriString in selectedUris
-                                                val coverBmp = if (useDefaultCovers) null else (book.cover ?: coverBitmapCache[book.uriString])
-
-                                                Card(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable {
-                                                            if (selectionMode) {
-                                                                selectedUris = if (isChecked) selectedUris - book.uriString else selectedUris + book.uriString
-                                                            } else if (!book.isTrashed) {
-                                                                openBook(book)
-                                                            }
-                                                        },
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    colors = CardDefaults.cardColors(containerColor = VioletCardElevated.copy(alpha = 0.96f)),
-                                                    border = BorderStroke(
-                                                        width = if (selectionMode && isChecked) 2.dp else 1.dp,
-                                                        color = if (selectionMode && isChecked) VioletAccentBright else VioletGrainGlow.copy(alpha = 0.35f)
-                                                    ),
-                                                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-                                                ) {
-                                                    Column {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .aspectRatio(0.70f)
-                                                                .background(VioletCardSurface),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            if (coverBmp != null) {
-                                                                Image(
-                                                                    bitmap = coverBmp.asImageBitmap(),
-                                                                    contentDescription = book.title,
-                                                                    modifier = Modifier.fillMaxSize(),
-                                                                    contentScale = ContentScale.Crop
-                                                                )
-                                                            } else {
-                                                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
-                                                                    Text(book.format, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = VioletAccentBright)
-                                                                    Spacer(modifier = Modifier.height(6.dp))
-                                                                    Text(book.title, style = MaterialTheme.typography.bodySmall, color = VioletInkLight, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                                                                }
-                                                            }
-                                                        }
-
-                                                        LinearProgressIndicator(
-                                                            progress = progress,
-                                                            color = VioletAccentBright,
-                                                            trackColor = VioletGrainGlow.copy(alpha = 0.25f),
-                                                            modifier = Modifier.fillMaxWidth().height(3.dp)
-                                                        )
-
-                                                        Row(
-                                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
-                                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            Text(
-                                                                text = if (book.isFavorite) "★ $percent%" else "$percent%",
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                color = VioletInkLight,
-                                                                maxLines = 1,
-                                                                softWrap = false,
-                                                                modifier = Modifier.clickable {
-                                                                    val updated = books.map {
-                                                                        if (it.uriString == book.uriString) it.copy(isFavorite = !it.isFavorite) else it
-                                                                    }
-                                                                    books = updated
-                                                                    saveBooks(context, updated)
-                                                                }
-                                                            )
-                                                            Text(
-                                                                text = book.title,
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                color = VioletInkLight,
-                                                                maxLines = 1,
-                                                                overflow = TextOverflow.Ellipsis,
-                                                                modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
-                                                            )
-                                                            Text(
-                                                                text = if (book.isTrashed) "Rest" else "Bin",
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                color = if (book.isTrashed) VioletAccentBright else MaterialTheme.colorScheme.error,
-                                                                maxLines = 1,
-                                                                softWrap = false,
-                                                                modifier = Modifier.clickable {
-                                                                    val updated = books.map {
-                                                                        if (it.uriString == book.uriString) it.copy(isTrashed = !it.isTrashed) else it
-                                                                    }
-                                                                    books = updated
-                                                                    saveBooks(context, updated)
-                                                                }
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (showDrawer) {
-                                BackHandler { showDrawer = false }
-                                Row(modifier = Modifier.fillMaxSize()) {
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth(0.78f).fillMaxHeight(),
-                                        color = VioletCardElevated,
-                                        shadowElevation = 14.dp
-                                    ) {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .statusBarsPadding()
-                                                .navigationBarsPadding()
-                                                .verticalScroll(rememberScrollState())
-                                                .padding(top = 20.dp, bottom = 18.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                ReadEraGraphicIcon(kind = "BOOKS", tint = VioletAccentBright, modifier = Modifier.size(28.dp))
-                                                Text("e-Bookish", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = VioletInkLight)
-                                            }
-
-                                            HorizontalDivider(color = VioletGrainGlow.copy(alpha = 0.3f))
-
-                                            @Composable
-                                            fun DrawerNavRow(label: String, iconKind: String, active: Boolean = false, onClick: () -> Unit) {
-                                                val rowTint = if (active) VioletAccentBright else VioletInkMuted
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .background(if (active) VioletCardSurface else ComposeColor.Transparent)
-                                                        .clickable { onClick() }
-                                                        .padding(horizontal = 18.dp, vertical = 12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                                                ) {
-                                                    ReadEraGraphicIcon(kind = iconKind, tint = rowTint)
-                                                    Text(
-                                                        text = label,
-                                                        style = MaterialTheme.typography.bodyLarge,
-                                                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                                                        color = if (active) VioletAccentBright else VioletInkLight,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            }
-
-                                            DrawerNavRow("Reading Now", "READING_NOW", section == ReadEraSection.READING_NOW) { section = ReadEraSection.READING_NOW; showDrawer = false }
-                                            DrawerNavRow("Books & documents", "BOOKS", section == ReadEraSection.BOOKS_AND_DOCS) { section = ReadEraSection.BOOKS_AND_DOCS; showDrawer = false }
-                                            DrawerNavRow("Favorites", "FAVORITES", section == ReadEraSection.FAVORITES) { section = ReadEraSection.FAVORITES; showDrawer = false }
-                                            DrawerNavRow("To Read", "TO_READ", section == ReadEraSection.TO_READ) { section = ReadEraSection.TO_READ; showDrawer = false }
-                                            DrawerNavRow("Have Read", "HAVE_READ", section == ReadEraSection.HAVE_READ) { section = ReadEraSection.HAVE_READ; showDrawer = false }
-                                            DrawerNavRow("Authors", "AUTHORS", section == ReadEraSection.AUTHORS) { section = ReadEraSection.AUTHORS; showDrawer = false }
-                                            DrawerNavRow("Series", "SERIES", section == ReadEraSection.SERIES) { section = ReadEraSection.SERIES; showDrawer = false }
-                                            DrawerNavRow("Collections", "COLLECTIONS", section == ReadEraSection.COLLECTIONS) { section = ReadEraSection.COLLECTIONS; showDrawer = false }
-                                            DrawerNavRow("Formats", "FORMATS", section == ReadEraSection.FORMATS) { section = ReadEraSection.FORMATS; showDrawer = false }
-                                            DrawerNavRow("Quotes", "QUOTES", section == ReadEraSection.QUOTES) { section = ReadEraSection.QUOTES; showDrawer = false }
-                                            DrawerNavRow("Dictionary", "DICTIONARY", section == ReadEraSection.DICTIONARY) { section = ReadEraSection.DICTIONARY; showDrawer = false }
-                                            DrawerNavRow("Synchronization", "SYNC") { showDrawer = false; showSyncDialog = true }
-                                            DrawerNavRow("Folders", "FOLDERS") { showDrawer = false; startFolderScan() }
-                                            DrawerNavRow("Downloads", "DOWNLOADS") { showDrawer = false; addBookLauncher.launch(arrayOf("*/*")) }
-                                            DrawerNavRow("Doc Scanner", "BOOKS") { showDrawer = false; showDocScanner = true }
-                                            DrawerNavRow("Trash", "TRASH", section == ReadEraSection.TRASH) { section = ReadEraSection.TRASH; showDrawer = false }
-
-                                            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = VioletGrainGlow.copy(alpha = 0.3f))
-
-                                            DrawerNavRow("Settings", "SETTINGS", section == ReadEraSection.SETTINGS) { section = ReadEraSection.SETTINGS; showDrawer = false }
-                                            DrawerNavRow("Send feedback", "FEEDBACK") {
-                                                showDrawer = false
-                                                val mailIntent = Intent(Intent.ACTION_SENDTO).apply {
-                                                    data = Uri.parse("mailto:")
-                                                    putExtra(Intent.EXTRA_SUBJECT, "e-Bookish Reader Feedback")
-                                                }
-                                                try {
-                                                    context.startActivity(mailIntent)
-                                                } catch (_: Exception) {
-                                                    showAboutDialog = true
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .background(ComposeColor.Black.copy(alpha = 0.52f))
-                                            .clickable { showDrawer = false }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun importCustomFontFile(context: Context, uri: Uri, rawName: String): CustomFontEntry? {
-        return try {
-            val fontsDir = File(context.filesDir, "custom_fonts")
-            if (!fontsDir.exists()) fontsDir.mkdirs()
-            val safeName = sanitizeFileName(rawName)
-            val targetFile = File(fontsDir, safeName)
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(targetFile).use { out -> input.copyTo(out) }
-            } ?: return null
-            if (targetFile.length() <= 100) return null
-            CustomFontEntry(name = safeName.substringBeforeLast("."), localPath = targetFile.absolutePath)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun saveCustomFonts(context: Context, list: List<CustomFontEntry>) {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        val arr = JSONArray()
-        list.forEach { f ->
-            arr.put(JSONObject().apply {
-                put("name", f.name)
-                put("path", f.localPath)
-            })
-        }
-        prefs.edit().putString("custom_fonts_json", arr.toString()).apply()
-    }
-
-    private fun loadCustomFonts(context: Context): List<CustomFontEntry> {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        val raw = prefs.getString("custom_fonts_json", null) ?: return listOf()
-        return try {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).mapNotNull { i ->
-                val o = arr.getJSONObject(i)
-                val p = o.optString("path", "")
-                if (p.isNotBlank() && File(p).exists()) {
-                    CustomFontEntry(name = o.optString("name", "CustomFont"), localPath = p)
-                } else null
-            }
-        } catch (_: Exception) {
-            listOf()
-        }
-    }
-
-    private fun saveQuotes(context: Context, list: List<QuoteEntry>) {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        prefs.edit().putString("quotes_json", quotesToJsonArray(list).toString()).apply()
-    }
-
-    private fun loadQuotes(context: Context): List<QuoteEntry> {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        val raw = prefs.getString("quotes_json", null) ?: return listOf()
-        return parseQuotesJsonArray(try { JSONArray(raw) } catch (_: Exception) { null })
-    }
-
-    private fun quotesToJsonArray(list: List<QuoteEntry>): JSONArray {
-        val arr = JSONArray()
-        list.forEach { q ->
-            arr.put(JSONObject().apply {
-                put("id", q.id)
-                put("bookTitle", q.bookTitle)
-                put("sectionIndex", q.sectionIndex)
-                put("text", q.text)
-                put("colorName", q.colorName)
-                put("timestamp", q.timestamp)
-            })
-        }
-        return arr
-    }
-
-    private fun parseQuotesJsonArray(arr: JSONArray?): List<QuoteEntry> {
-        if (arr == null) return listOf()
-        return (0 until arr.length()).mapNotNull { i ->
-            val o = arr.optJSONObject(i) ?: return@mapNotNull null
-            QuoteEntry(
-                id = o.optString("id", "$i"),
-                bookTitle = o.optString("bookTitle", "Book"),
-                sectionIndex = o.optInt("sectionIndex", 0),
-                text = o.optString("text", ""),
-                colorName = o.optString("colorName", QuoteColorOption.VIOLET.name),
-                timestamp = o.optLong("timestamp", 0L)
-            )
-        }
-    }
-
-    private fun saveDictionary(context: Context, list: List<DictionaryEntry>) {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        prefs.edit().putString("dictionary_json", dictionaryToJsonArray(list).toString()).apply()
-    }
-
-    private fun loadDictionary(context: Context): List<DictionaryEntry> {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        val raw = prefs.getString("dictionary_json", null) ?: return listOf()
-        return parseDictionaryJsonArray(try { JSONArray(raw) } catch (_: Exception) { null })
-    }
-
-    private fun dictionaryToJsonArray(list: List<DictionaryEntry>): JSONArray {
-        val arr = JSONArray()
-        list.forEach { d ->
-            arr.put(JSONObject().apply {
-                put("word", d.word)
-                put("definition", d.definition)
-                put("sourceBook", d.sourceBook)
-                put("timestamp", d.timestamp)
-            })
-        }
-        return arr
-    }
-
-    private fun parseDictionaryJsonArray(arr: JSONArray?): List<DictionaryEntry> {
-        if (arr == null) return listOf()
-        return (0 until arr.length()).mapNotNull { i ->
-            val o = arr.optJSONObject(i) ?: return@mapNotNull null
-            DictionaryEntry(
-                word = o.optString("word", ""),
-                definition = o.optString("definition", ""),
-                sourceBook = o.optString("sourceBook", ""),
-                timestamp = o.optLong("timestamp", 0L)
-            )
-        }
-    }
-
-    private fun extractEpubCoverBitmap(context: Context, uri: Uri): Bitmap? {
-        return try {
-            var fallbackImageBytes: ByteArray? = null
-            var priorityImageBytes: ByteArray? = null
-
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                ZipInputStream(inputStream).use { zip ->
-                    var entry = zip.nextEntry
-                    while (entry != null) {
-                        if (!entry.isDirectory) {
-                            val nameLower = entry.name.lowercase()
-                            val isImg = nameLower.endsWith(".jpg") ||
-                                nameLower.endsWith(".jpeg") ||
-                                nameLower.endsWith(".png") ||
-                                nameLower.endsWith(".webp")
-                            if (isImg) {
-                                val bytes = zip.readBytes()
-                                if (bytes.size > 1500) {
-                                    if (nameLower.contains("cover") || nameLower.contains("title") || nameLower.contains("front")) {
-                                        if (priorityImageBytes == null || bytes.size > priorityImageBytes!!.size) {
-                                            priorityImageBytes = bytes
-                                        }
-                                    } else if (fallbackImageBytes == null) {
-                                        fallbackImageBytes = bytes
-                                    }
-                                }
-                            }
-                        }
-                        zip.closeEntry()
-                        entry = zip.nextEntry
-                    }
-                }
-            }
-            val chosen = priorityImageBytes ?: fallbackImageBytes ?: return null
-            decodeScaledCover(chosen)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun extractMobiAzwCoverBitmap(context: Context, uri: Uri): Bitmap? {
-        return try {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-            if (bytes.size < 32) return null
-
-            val zipIdx = findSubsequence(bytes, byteArrayOf(0x50, 0x4B, 0x03, 0x04))
-            if (zipIdx >= 0 && zipIdx < bytes.size - 16) {
-                var bestZipImg: ByteArray? = null
-                ZipInputStream(bytes.copyOfRange(zipIdx, bytes.size).inputStream()).use { zip ->
-                    var entry = zip.nextEntry
-                    while (entry != null) {
-                        if (!entry.isDirectory) {
-                            val n = entry.name.lowercase()
-                            if (n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png")) {
-                                val imgBytes = zip.readBytes()
-                                if (imgBytes.size > 2000 && (bestZipImg == null || imgBytes.size > bestZipImg!!.size)) {
-                                    bestZipImg = imgBytes
-                                }
-                            }
-                        }
-                        zip.closeEntry()
-                        entry = zip.nextEntry
-                    }
-                }
-                if (bestZipImg != null) return decodeScaledCover(bestZipImg!!)
-            }
-
-            val jpgStart = findSubsequence(bytes, byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()))
-            if (jpgStart >= 0 && jpgStart < bytes.size - 128) {
-                val endMarker = findSubsequenceFrom(bytes, byteArrayOf(0xFF.toByte(), 0xD9.toByte()), jpgStart + 4)
-                val endIdx = if (endMarker > jpgStart) endMarker + 2 else bytes.size
-                val jpgSlice = bytes.copyOfRange(jpgStart, endIdx)
-                decodeScaledCover(jpgSlice)?.let { return it }
-            }
-
-            val pngStart = findSubsequence(bytes, byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
-            if (pngStart >= 0 && pngStart < bytes.size - 128) {
-                val pngSlice = bytes.copyOfRange(pngStart, bytes.size)
-                decodeScaledCover(pngSlice)?.let { return it }
-            }
-
-            null
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun decodeScaledCover(bytes: ByteArray): Bitmap? {
-        val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-        val maxSide = 480
-        val w = raw.width
-        val h = raw.height
-        if (w <= 1 || h <= 1) return null
-        if (w <= maxSide && h <= maxSide) return raw
-        return if (w >= h) {
-            val newH = ((h.toFloat() / w.toFloat()) * maxSide).toInt().coerceAtLeast(1)
-            Bitmap.createScaledBitmap(raw, maxSide, newH, true)
-        } else {
-            val newW = ((w.toFloat() / h.toFloat()) * maxSide).toInt().coerceAtLeast(1)
-            Bitmap.createScaledBitmap(raw, newW, maxSide, true)
-        }
-    }
-
-    private fun findSubsequenceFrom(haystack: ByteArray, needle: ByteArray, startFrom: Int): Int {
-        if (needle.isEmpty() || haystack.size < needle.size) return -1
-        val safeStart = startFrom.coerceAtLeast(0)
-        for (i in safeStart..(haystack.size - needle.size)) {
-            var match = true
-            for (j in needle.indices) {
-                if (haystack[i + j] != needle[j]) {
-                    match = false
-                    break
-                }
-            }
-            if (match) return i
-        }
-        return -1
-    }
-
-    private fun shareExportedScan(context: Context, exported: ExportedScanResult) {
-        try {
-            if (exported.uris.size == 1) {
-                val uri = exported.uris.first()
-                val mime = if (exported.format == "PDF") "application/pdf" else "image/jpeg"
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = mime
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_SUBJECT, exported.title)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(Intent.createChooser(intent, "Share ${exported.title}"))
-            } else if (exported.uris.size > 1) {
-                val uriList = ArrayList(exported.uris)
-                val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                    type = "image/jpeg"
-                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, uriList)
-                    putExtra(Intent.EXTRA_SUBJECT, exported.title)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(Intent.createChooser(intent, "Share ${exported.title}"))
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun sanitizeFileName(raw: String): String {
-        val cleaned = raw.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
-        return if (cleaned.isBlank()) "Scanned_Doc" else cleaned
-    }
-
-    private fun decodeBitmapFromUri(context: Context, uri: Uri): Bitmap? {
-        return try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                val raw = BitmapFactory.decodeStream(stream) ?: return null
-                val maxSide = 1600
-                val w = raw.width
-                val h = raw.height
-                if (w <= maxSide && h <= maxSide) {
-                    raw
-                } else if (w >= h) {
-                    val newH = ((h.toFloat() / w.toFloat()) * maxSide).toInt().coerceAtLeast(1)
-                    Bitmap.createScaledBitmap(raw, maxSide, newH, true)
-                } else {
-                    val newW = ((w.toFloat() / h.toFloat()) * maxSide).toInt().coerceAtLeast(1)
-                    Bitmap.createScaledBitmap(raw, newW, maxSide, true)
-                }
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun savePagesAsPdf(context: Context, baseName: String, pages: List<Bitmap>): Uri? {
-        val pdfDoc = PdfDocument()
-        try {
-            for (i in pages.indices) {
-                val bmp = pages[i]
-                val pageW = bmp.width.coerceAtLeast(1)
-                val pageH = bmp.height.coerceAtLeast(1)
-                val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create()
-                val page = pdfDoc.startPage(pageInfo)
-                page.canvas.drawColor(Color.WHITE)
-                page.canvas.drawBitmap(bmp, 0f, 0f, null)
-                pdfDoc.finishPage(page)
-            }
-
-            val fileName = "$baseName.pdf"
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                    put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                }
-                val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    ?: return null
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    pdfDoc.writeTo(out)
-                }
-                return uri
-            } else {
-                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                if (!dir.exists()) dir.mkdirs()
-                val outFile = File(dir, fileName)
-                FileOutputStream(outFile).use { out ->
-                    pdfDoc.writeTo(out)
-                }
-                return Uri.fromFile(outFile)
-            }
-        } catch (_: Exception) {
-            return null
-        } finally {
-            try {
-                pdfDoc.close()
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    private fun savePagesAsJpegsWithUris(context: Context, baseName: String, pages: List<Bitmap>): List<Uri> {
-        val savedUris = mutableListOf<Uri>()
-        for (i in pages.indices) {
-            val bmp = pages[i]
-            val suffix = if (pages.size == 1) "" else "_p${i + 1}"
-            val fileName = "$baseName$suffix.jpg"
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val values = ContentValues().apply {
-                        put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/e-Bookish")
-                    }
-                    val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                    if (uri != null) {
-                        context.contentResolver.openOutputStream(uri)?.use { out ->
-                            bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
-                        }
-                        savedUris.add(uri)
-                    }
-                } else {
-                    val dir = File(
-                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                        "e-Bookish"
-                    )
-                    if (!dir.exists()) dir.mkdirs()
-                    val outFile = File(dir, fileName)
-                    FileOutputStream(outFile).use { out ->
-                        bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
-                    }
-                    savedUris.add(Uri.fromFile(outFile))
-                }
-            } catch (_: Exception) {
-            }
-        }
-        return savedUris
-    }
-
-    private fun collectBooksFromTreeFast(
-        context: Context,
-        treeUri: Uri,
-        onProgress: (Int) -> Unit
-    ): List<Pair<Uri, String>> {
-        val found = mutableListOf<Pair<Uri, String>>()
-        val queue = ArrayDeque<String>()
-        val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-        queue.add(rootDocId)
-
-        val skippedDirs = setOf("android", "dcim", "movies", "music", "cache", ".thumbnails")
-        val projection = arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE
-        )
-
-        var lastReported = 0
-        while (queue.isNotEmpty() && found.size < 300) {
-            val parentDocId = queue.removeFirst()
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
-            try {
-                context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-                    val idIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                    val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                    val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
-
-                    while (cursor.moveToNext() && found.size < 300) {
-                        val docId = if (idIdx >= 0) cursor.getString(idIdx) else continue
-                        val name = if (nameIdx >= 0) cursor.getString(nameIdx) ?: "" else ""
-                        val mime = if (mimeIdx >= 0) cursor.getString(mimeIdx) ?: "" else ""
-
-                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                            val dirLower = name.lowercase()
-                            if (dirLower !in skippedDirs && !dirLower.startsWith(".")) {
-                                queue.add(docId)
-                            }
-                        } else {
-                            if (detectBookFormat(name, mime) != null) {
-                                val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-                                found.add(Pair(docUri, name))
-                                if (found.size - lastReported >= 5) {
-                                    lastReported = found.size
-                                    onProgress(found.size)
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }
-        onProgress(found.size)
-        return found
-    }
-
-    private fun saveSavedFolderUri(context: Context, uriString: String) {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        prefs.edit().putString("scan_tree_uri", uriString).apply()
-    }
-
-    private fun loadSavedFolderUri(context: Context): String? {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        return prefs.getString("scan_tree_uri", null)
-    }
-
-    @Suppress("DEPRECATION")
-    private fun extractEpubChapters(context: Context, uri: Uri): List<String> {
-        val chapters = mutableListOf<String>()
-        try {
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                ZipInputStream(inputStream).use { zip ->
-                    var entry = zip.nextEntry
-                    while (entry != null) {
-                        if (!entry.isDirectory) {
-                            val lower = entry.name.lowercase()
-                            if (lower.endsWith(".xhtml") || lower.endsWith(".html") || lower.endsWith(".htm")) {
-                                val buffer = ByteArrayOutputStream()
-                                val tmp = ByteArray(4096)
-                                var read = zip.read(tmp)
-                                while (read != -1) {
-                                    buffer.write(tmp, 0, read)
-                                    read = zip.read(tmp)
-                                }
-                                val rawHtml = buffer.toString("UTF-8")
-                                val plainText = Html.fromHtml(rawHtml).toString()
-                                    .replace(Regex("\n{3,}"), "\n\n")
-                                    .trim()
-                                if (plainText.isNotBlank()) {
-                                    chapters.add(plainText)
-                                }
-                            }
-                        }
-                        zip.closeEntry()
-                        entry = zip.nextEntry
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return chapters
-    }
-
-    private fun extractTxtSections(context: Context, uri: Uri): List<String> {
-        return try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                val bytes = stream.readBytes()
-                val text = String(bytes, Charset.forName("UTF-8"))
-                splitTextIntoSections(text)
-            } ?: listOf()
-        } catch (_: Exception) {
-            listOf()
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun extractFb2Sections(context: Context, uri: Uri): List<String> {
-        return try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                val rawXml = String(stream.readBytes(), Charset.forName("UTF-8"))
-                val normalized = rawXml
-                    .replace(Regex("</p>|</div>|</section>|</title>|</subtitle>|</stanza>|</v>"), "\n\n")
-                    .replace(Regex("<br\\s*/?>"), "\n")
-                val plain = Html.fromHtml(normalized).toString()
-                splitTextIntoSections(plain)
-            } ?: listOf()
-        } catch (_: Exception) {
-            listOf()
-        }
-    }
-
-    private fun extractDocxSections(context: Context, uri: Uri): List<String> {
-        return try {
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                ZipInputStream(inputStream).use { zip ->
-                    var docXml = ""
-                    var entry = zip.nextEntry
-                    while (entry != null) {
-                        if (!entry.isDirectory && entry.name.equals("word/document.xml", ignoreCase = true)) {
-                            docXml = String(zip.readBytes(), Charset.forName("UTF-8"))
-                            break
-                        }
-                        zip.closeEntry()
-                        entry = zip.nextEntry
-                    }
-                    if (docXml.isBlank()) return listOf()
-                    val cleaned = docXml
-                        .replace(Regex("</w:p>"), "\n\n")
-                        .replace(Regex("<w:tab\\s*/>"), "    ")
-                        .replace(Regex("<w:br\\s*/?>"), "\n")
-                        .replace(Regex("<[^>]+>"), "")
-                        .replace("&amp;", "&")
-                        .replace("&lt;", "<")
-                        .replace("&gt;", ">")
-                        .replace("&quot;", "\"")
-                        .replace("&apos;", "'")
-                    splitTextIntoSections(cleaned)
-                }
-            } ?: listOf()
-        } catch (_: Exception) {
-            listOf()
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun extractMobiAzwSections(context: Context, uri: Uri): List<String> {
-        return try {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return listOf()
-            if (bytes.isEmpty()) return listOf()
-
-            val zipSignatureIdx = findSubsequence(bytes, byteArrayOf(0x50, 0x4B, 0x03, 0x04))
-            if (zipSignatureIdx >= 0 && zipSignatureIdx < bytes.size - 16) {
-                val subBytes = bytes.copyOfRange(zipSignatureIdx, bytes.size)
-                val embeddedChapters = mutableListOf<String>()
-                ZipInputStream(subBytes.inputStream()).use { zip ->
-                    var entry = zip.nextEntry
-                    while (entry != null) {
-                        if (!entry.isDirectory) {
-                            val lower = entry.name.lowercase()
-                            if (lower.endsWith(".xhtml") || lower.endsWith(".html") || lower.endsWith(".htm")) {
-                                val htmlStr = String(zip.readBytes(), Charset.forName("UTF-8"))
-                                val plain = Html.fromHtml(htmlStr).toString()
-                                    .replace(Regex("\n{3,}"), "\n\n")
-                                    .trim()
-                                if (plain.isNotBlank()) embeddedChapters.add(plain)
-                            }
-                        }
-                        zip.closeEntry()
-                        entry = zip.nextEntry
-                    }
-                }
-                if (embeddedChapters.isNotEmpty()) return embeddedChapters
-            }
-
-            val sb = StringBuilder()
-            var runStart = -1
-            for (i in bytes.indices) {
-                val b = bytes[i].toInt() and 0xFF
-                val isReadable = (b in 0x20..0x7E) || b == 0x0A || b == 0x0D || b == 0x09 || b >= 0xC0
-                if (isReadable) {
-                    if (runStart == -1) runStart = i
-                } else {
-                    if (runStart != -1 && i - runStart >= 24) {
-                        val chunk = String(bytes, runStart, i - runStart, Charset.forName("UTF-8"))
-                            .replace(Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]"), " ")
-                            .replace(Regex("[ ]{3,}"), " ")
-                            .trim()
-                        if (chunk.length >= 24 && !chunk.startsWith("BOOKMOBI") && !chunk.startsWith("EXTH")) {
-                            val decoded = if (chunk.contains("<") && chunk.contains(">")) {
-                                Html.fromHtml(chunk).toString().trim()
-                            } else {
-                                chunk
-                            }
-                            if (decoded.length >= 20) {
-                                if (sb.isNotEmpty()) sb.append("\n\n")
-                                sb.append(decoded)
-                            }
-                        }
-                    }
-                    runStart = -1
-                }
-            }
-            if (runStart != -1 && bytes.size - runStart >= 24) {
-                val chunk = String(bytes, runStart, bytes.size - runStart, Charset.forName("UTF-8")).trim()
-                if (chunk.length >= 20) {
-                    if (sb.isNotEmpty()) sb.append("\n\n")
-                    sb.append(chunk)
-                }
-            }
-
-            splitTextIntoSections(sb.toString())
-        } catch (_: Exception) {
-            listOf()
-        }
-    }
-
-    private fun findSubsequence(haystack: ByteArray, needle: ByteArray): Int {
-        if (needle.isEmpty() || haystack.size < needle.size) return -1
-        for (i in 0..(haystack.size - needle.size)) {
-            var match = true
-            for (j in needle.indices) {
-                if (haystack[i + j] != needle[j]) {
-                    match = false
-                    break
-                }
-            }
-            if (match) return i
-        }
-        return -1
-    }
-
-    private fun booksToJsonArray(books: List<BookItem>): JSONArray {
-        val arr = JSONArray()
-        for (b in books) {
-            val obj = JSONObject()
-            obj.put("uri", b.uriString)
-            obj.put("title", b.title)
-            obj.put("format", b.format)
-            obj.put("pageCount", b.pageCount)
-            obj.put("lastPage", b.lastPage)
-            obj.put("isFavorite", b.isFavorite)
-            obj.put("isTrashed", b.isTrashed)
-            obj.put("author", b.author)
-            obj.put("collection", b.collection)
-            arr.put(obj)
-        }
-        return arr
-    }
-
-    private fun parseBooksJsonArray(arr: JSONArray?): List<BookItem> {
-        if (arr == null) return listOf()
-        val list = mutableListOf<BookItem>()
-        for (i in 0 until arr.length()) {
-            val obj = arr.optJSONObject(i) ?: continue
-            val title = obj.optString("title", "Untitled")
-            val fmt = obj.optString("format", "PDF")
-            list.add(
-                BookItem(
-                    uriString = obj.optString("uri", ""),
-                    title = title,
-                    format = fmt,
-                    pageCount = obj.optInt("pageCount", 1),
-                    lastPage = obj.optInt("lastPage", 0),
-                    isFavorite = obj.optBoolean("isFavorite", false),
-                    isTrashed = obj.optBoolean("isTrashed", false),
-                    author = obj.optString("author", if (title.contains(" - ")) title.substringBefore(" - ").trim() else "Library"),
-                    collection = obj.optString(
-                        "collection",
-                        when (fmt) {
-                            "EPUB", "MOBI", "AZW", "AZW3", "FB2" -> "Ebooks"
-                            "TXT", "DOCX" -> "Notes & Docs"
-                            else -> "Documents"
-                        }
-                    ),
-                    cover = null,
-                    metadataLoaded = false
-                )
-            )
-        }
-        return list.filter { it.uriString.isNotBlank() }
-    }
-
-    private fun saveBooks(context: Context, books: List<BookItem>) {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        prefs.edit().putString("books_json", booksToJsonArray(books).toString()).apply()
-    }
-
-    private fun loadBooks(context: Context): List<BookItem> {
-        val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
-        val raw = prefs.getString("books_json", null) ?: return listOf()
-        return parseBooksJsonArray(try { JSONArray(raw) } catch (_: Exception) { null })
-    }
-
-    private fun getRawFileName(context: Context, uri: Uri): String {
-        var name = "Untitled Book"
-        try {
-            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (cursor.moveToFirst() && nameIndex >= 0) {
-                    name = cursor.getString(nameIndex) ?: name
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return name
-    }
-
-    private fun getPdfPageCount(context: Context, uri: Uri): Int {
-        return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                PdfRenderer(pfd).use { it.pageCount }
-            } ?: 0
-        } catch (_: Exception) {
-            0
-        }
-    }
-
-    private fun renderSinglePage(context: Context, uri: Uri, pageIndex: Int, scale: Float): Bitmap? {
-        return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                PdfRenderer(pfd).use { renderer ->
-                    if (pageIndex < 0 || pageIndex >= renderer.pageCount) return null
-                    renderer.openPage(pageIndex).use { page ->
-                        val w = (page.width * scale).toInt().coerceAtLeast(1)
-                        val h = (page.height * scale).toInt().coerceAtLeast(1)
-                        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                        bmp.eraseColor(Color.WHITE)
-                        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        bmp
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun renderAllPages(context: Context, uri: Uri): List<Bitmap> {
-        val result = mutableListOf<Bitmap>()
-        var pfd: ParcelFileDescriptor? = null
-        var renderer: PdfRenderer? = null
-        try {
-            pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return listOf()
-            renderer = PdfRenderer(pfd)
-            for (i in 0 until renderer.pageCount) {
-                renderer.openPage(i).use { page ->
-                    val scale = 1.5f
-                    val width = (page.width * scale).toInt().coerceAtLeast(1)
-                    val height = (page.height * scale).toInt().coerceAtLeast(1)
-                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                    bitmap.eraseColor(Color.WHITE)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    result.add(bitmap)
-                }
-            }
-        } catch (_: Exception) {
-            return listOf()
-        } finally {
-            try {
-                renderer?.close()
-            } catch (_: Exception) {
-            }
-            try {
-                pfd?.close()
-            } catch (_: Exception) {
-            }
-        }
-        return result
-    }
-}
-
-private fun cropSidesBitmap(
-    src: Bitmap,
-    leftFrac: Float,
-    topFrac: Float,
-    rightFrac: Float,
-    bottomFrac: Float
-): Bitmap {
-    val w = src.width
-    val h = src.height
-    if (w <= 2 || h <= 2) return src
-
-    val x0 = (w * leftFrac).toInt().coerceIn(0, w - 2)
-    val y0 = (h * topFrac).toInt().coerceIn(0, h - 2)
-    val x1 = (w * (1f - rightFrac)).toInt().coerceIn(x0 + 1, w)
-    val y1 = (h * (1f - bottomFrac)).toInt().coerceIn(y0 + 1, h)
-    val cropW = (x1 - x0).coerceAtLeast(1)
-    val cropH = (y1 - y0).coerceAtLeast(1)
-    return Bitmap.createBitmap(src, x0, y0, cropW, cropH)
-}
-
-private fun applyScanFilter(src: Bitmap, mode: ScanFilterMode): Bitmap {
-    if (mode == ScanFilterMode.ORIGINAL) return src
-    val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(out)
-    val cm = ColorMatrix()
-    when (mode) {
-        ScanFilterMode.ORIGINAL -> Unit
-        ScanFilterMode.DOC_BW -> {
-            cm.setSaturation(0f)
-            val contrast = 1.65f
-            val brightness = 16f
-            val bwMatrix = ColorMatrix(
-                floatArrayOf(
-                    contrast, 0f, 0f, 0f, brightness,
-                    0f, contrast, 0f, 0f, brightness,
-                    0f, 0f, contrast, 0f, brightness,
-                    0f, 0f, 0f, 1f, 0f
-                )
-            )
-            cm.postConcat(bwMatrix)
-        }
-        ScanFilterMode.MAGIC_COLOR -> {
-            cm.setSaturation(1.35f)
-            val contrast = 1.25f
-            val brightness = 8f
-            val colorMatrix = ColorMatrix(
-                floatArrayOf(
-                    contrast, 0f, 0f, 0f, brightness,
-                    0f, contrast, 0f, 0f, brightness,
-                    0f, 0f, contrast, 0f, brightness,
-                    0f, 0f, 0f, 1f, 0f
-                )
-            )
-            cm.postConcat(colorMatrix)
-        }
-        ScanFilterMode.GRAYSCALE -> {
-            cm.setSaturation(0f)
-        }
-    }
-    val paint = Paint().apply {
-        colorFilter = ColorMatrixColorFilter(cm)
-    }
-    canvas.drawBitmap(src, 0f, 0f, paint)
-    return out
-}
+                                                    elevation = CardDefaults.cardElevation(defaultElevation = 
