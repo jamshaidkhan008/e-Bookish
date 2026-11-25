@@ -3079,8 +3079,8 @@ class MainActivity : ComponentActivity() {
                                 if (formatFilter == "ALL") activeBooks
                                 else activeBooks.filter { it.format.equals(formatFilter, ignoreCase = true) }
                             }
-                            ReadEraSection.QUOTES -> emptyList()
-                            ReadEraSection.DICTIONARY -> emptyList()
+                            ReadEraSection.QUOTES -> emptyList(BookItem)
+                            ReadEraSection.DICTIONARY -> emptyList(BookItem)
                             ReadEraSection.TRASH -> trashedBooks
                             ReadEraSection.SETTINGS -> activeBooks
                         }
