@@ -1,5 +1,6 @@
 package com.docuverse.app
 
+import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -21,6 +22,7 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.text.Html
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -124,18 +126,20 @@ import java.util.zip.ZipInputStream
 import kotlin.math.sin
 import kotlin.random.Random
 
-private val ReadEraBarColor = ComposeColor(0xFF146C8E)
-private val ReadEraBarText = ComposeColor(0xFFFFFFFF)
+private val VioletBarColor = ComposeColor(0xFF2B1147)
+private val VioletBarText = ComposeColor(0xFFF6EEFF)
 
-private val WoodLightBase = ComposeColor(0xFFD6B48C)
-private val WoodLightWarm = ComposeColor(0xFFC79F72)
-private val WoodGrainDark = ComposeColor(0xFF8C5E34)
-private val WoodGrainSoft = ComposeColor(0xFFA97A4D)
-private val WoodEspressoInk = ComposeColor(0xFF2B1A0E)
-private val WoodMutedInk = ComposeColor(0xFF5A3D24)
-private val WoodCardSurface = ComposeColor(0xFFF3E2C7)
-private val WoodCardElevated = ComposeColor(0xFFFAF0DF)
-private val WoodAccentWalnut = ComposeColor(0xFF6B3E1E)
+private val VioletBaseDark = ComposeColor(0xFF160A24)
+private val VioletMidDark = ComposeColor(0xFF221038)
+private val VioletGrainLine = ComposeColor(0xFF47246E)
+private val VioletGrainGlow = ComposeColor(0xFF6B39A3)
+private val VioletInkLight = ComposeColor(0xFFF7F0FF)
+private val VioletInkMuted = ComposeColor(0xFFCBB6E6)
+private val VioletCardSurface = ComposeColor(0xFF26123E)
+private val VioletCardElevated = ComposeColor(0xFF311850)
+private val VioletAccentBright = ComposeColor(0xFF9D5CFF)
+
+private val coverBitmapCache = mutableMapOf<String, Bitmap>()
 
 enum class LibraryViewMode {
     GRID_3, GRID_2, LIST
@@ -222,28 +226,28 @@ data class ExportedScanResult(
     val bookItem: BookItem? = null
 )
 
-private val WoodyLightScheme = lightColorScheme(
-    primary = WoodAccentWalnut,
-    onPrimary = ComposeColor(0xFFFFF8EE),
-    background = WoodLightBase,
-    onBackground = WoodEspressoInk,
-    surface = WoodCardSurface,
-    onSurface = WoodEspressoInk,
-    surfaceVariant = WoodLightWarm,
-    onSurfaceVariant = WoodMutedInk,
-    error = ComposeColor(0xFF9E2A22)
+private val DarkVioletScheme = darkColorScheme(
+    primary = VioletAccentBright,
+    onPrimary = VioletInkLight,
+    background = VioletBaseDark,
+    onBackground = VioletInkLight,
+    surface = VioletCardSurface,
+    onSurface = VioletInkLight,
+    surfaceVariant = VioletCardElevated,
+    onSurfaceVariant = VioletInkMuted,
+    error = ComposeColor(0xFFFF6B7A)
 )
 
-private val WoodyWarmScheme = darkColorScheme(
-    primary = WoodAccentWalnut,
-    onPrimary = ComposeColor(0xFFFFF8EE),
-    background = WoodLightBase,
-    onBackground = WoodEspressoInk,
-    surface = WoodCardSurface,
-    onSurface = WoodEspressoInk,
-    surfaceVariant = WoodLightWarm,
-    onSurfaceVariant = WoodMutedInk,
-    error = ComposeColor(0xFF9E2A22)
+private val LightVioletFallbackScheme = lightColorScheme(
+    primary = VioletAccentBright,
+    onPrimary = VioletInkLight,
+    background = VioletBaseDark,
+    onBackground = VioletInkLight,
+    surface = VioletCardSurface,
+    onSurface = VioletInkLight,
+    surfaceVariant = VioletCardElevated,
+    onSurfaceVariant = VioletInkMuted,
+    error = ComposeColor(0xFFFF6B7A)
 )
 
 private fun isTextPagedFormat(format: String): Boolean {
@@ -278,16 +282,24 @@ private fun stripBookExtension(rawName: String): String {
         .removeSuffix(".docx").removeSuffix(".DOCX")
 }
 
+private fun applyScreenBrightness(context: Context, level: Float) {
+    val activity = context as? Activity ?: return
+    val clamped = level.coerceIn(0.08f, 1.0f)
+    val lp = activity.window.attributes
+    lp.screenBrightness = clamped
+    activity.window.attributes = lp
+}
+
 @Composable
-private fun WoodGrainBackground(modifier: Modifier = Modifier) {
+private fun DarkVioletTextureBackground(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier.background(
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    WoodLightBase,
-                    WoodLightWarm,
-                    WoodLightBase,
-                    WoodLightWarm
+                    VioletBaseDark,
+                    VioletMidDark,
+                    VioletBaseDark,
+                    VioletMidDark
                 )
             )
         )
@@ -295,43 +307,34 @@ private fun WoodGrainBackground(modifier: Modifier = Modifier) {
         ComposeCanvas(modifier = Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
-            val plankCount = 9
-            val plankH = h / plankCount
+            val bandCount = 8
+            val bandH = h / bandCount
 
-            for (p in 0 until plankCount) {
-                val topY = p * plankH
-                val phase = p * 1.35f
-
-                val fiberCount = 7
-                for (f in 0 until fiberCount) {
-                    val baseOffset = topY + plankH * ((f + 0.5f) / fiberCount)
+            for (b in 0 until bandCount) {
+                val topY = b * bandH
+                val phase = b * 1.2f
+                for (g in 0 until 5) {
+                    val baseY = topY + bandH * ((g + 0.5f) / 5f)
                     val path = Path()
-                    val steps = 28
+                    val steps = 24
                     for (s in 0..steps) {
                         val x = (w * s) / steps
-                        val wave = sin((x / w) * 6.283f + phase + f * 0.7f) * (plankH * 0.045f)
-                        val y = baseOffset + wave
+                        val wave = sin((x / w) * 6.283f + phase + g * 0.8f) * (bandH * 0.04f)
+                        val y = baseY + wave
                         if (s == 0) path.moveTo(x, y) else path.lineTo(x, y)
                     }
                     drawPath(
                         path = path,
-                        color = if (f % 2 == 0) WoodGrainSoft.copy(alpha = 0.24f) else WoodGrainDark.copy(alpha = 0.14f),
-                        style = Stroke(width = if (f % 3 == 0) 2.2f else 1.2f, cap = StrokeCap.Round)
+                        color = if (g % 2 == 0) VioletGrainLine.copy(alpha = 0.28f) else VioletGrainGlow.copy(alpha = 0.14f),
+                        style = Stroke(width = 1.6f, cap = StrokeCap.Round)
                     )
                 }
-
-                if (p > 0) {
+                if (b > 0) {
                     drawLine(
-                        color = WoodGrainDark.copy(alpha = 0.34f),
+                        color = VioletGrainLine.copy(alpha = 0.42f),
                         start = Offset(0f, topY),
                         end = Offset(w, topY),
-                        strokeWidth = 2.0f
-                    )
-                    drawLine(
-                        color = WoodCardElevated.copy(alpha = 0.35f),
-                        start = Offset(0f, topY + 2.2f),
-                        end = Offset(w, topY + 2.2f),
-                        strokeWidth = 1.4f
+                        strokeWidth = 1.5f
                     )
                 }
             }
@@ -525,14 +528,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            var isDarkTheme by remember { mutableStateOf(false) }
+            var isDarkTheme by remember { mutableStateOf(true) }
 
             MaterialTheme(
-                colorScheme = if (isDarkTheme) WoodyWarmScheme else WoodyLightScheme
+                colorScheme = if (isDarkTheme) DarkVioletScheme else LightVioletFallbackScheme
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = WoodLightBase
+                    color = VioletBaseDark
                 ) {
                     val context = LocalContext.current
                     val scope = rememberCoroutineScope()
@@ -563,6 +566,9 @@ class MainActivity : ComponentActivity() {
                     var epubSideMarginDp by remember { mutableIntStateOf(24) }
                     var epubParagraphIndentLevel by remember { mutableIntStateOf(1) }
 
+                    var screenBrightness by remember { mutableFloatStateOf(0.75f) }
+                    var showBrightnessSlider by remember { mutableStateOf(false) }
+
                     var activeBook by remember { mutableStateOf<BookItem?>(null) }
                     var readerPages by remember { mutableStateOf(listOf<Bitmap>()) }
                     var textBookSections by remember { mutableStateOf(listOf<String>()) }
@@ -580,8 +586,24 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    fun resolveBookCover(book: BookItem, scale: Float = 0.5f): Bitmap? {
+                        coverBitmapCache[book.uriString]?.let { return it }
+                        val uri = Uri.parse(book.uriString)
+                        val bmp = when (book.format) {
+                            "PDF" -> renderSinglePage(context, uri, 0, scale)
+                            "EPUB" -> extractEpubCoverBitmap(context, uri)
+                            "MOBI", "AZW", "AZW3" -> extractMobiAzwCoverBitmap(context, uri)
+                            else -> null
+                        }
+                        if (bmp != null) {
+                            coverBitmapCache[book.uriString] = bmp
+                        }
+                        return bmp
+                    }
+
                     fun rebuildAllCovers() {
                         scanNotice = "Rebuilding book covers..."
+                        coverBitmapCache.clear()
                         Thread {
                             val working = books.toMutableList()
                             for (i in working.indices) {
@@ -589,7 +611,7 @@ class MainActivity : ComponentActivity() {
                                 if (b.format == "PDF") {
                                     val uri = Uri.parse(b.uriString)
                                     val count = getPdfPageCount(context, uri)
-                                    val thumb = renderSinglePage(context, uri, 0, 0.5f)
+                                    val thumb = resolveBookCover(b, 0.5f)
                                     working[i] = b.copy(
                                         pageCount = if (count > 0) count else b.pageCount.coerceAtLeast(1),
                                         cover = thumb,
@@ -597,8 +619,10 @@ class MainActivity : ComponentActivity() {
                                     )
                                 } else {
                                     val secs = loadSectionsForBook(b)
+                                    val thumb = resolveBookCover(b, 0.5f)
                                     working[i] = b.copy(
                                         pageCount = if (secs.isNotEmpty()) secs.size else b.pageCount.coerceAtLeast(1),
+                                        cover = thumb,
                                         metadataLoaded = true
                                     )
                                 }
@@ -614,29 +638,42 @@ class MainActivity : ComponentActivity() {
                     }
 
                     LaunchedEffect(books.size) {
-                        val pending = books.filter { !it.metadataLoaded }
+                        val pending = books.filter { !it.metadataLoaded || (it.cover == null && !useDefaultCovers) }
                         if (pending.isNotEmpty()) {
                             Thread {
                                 val working = books.toMutableList()
                                 var changed = false
                                 for (i in working.indices) {
                                     val b = working[i]
-                                    if (!b.metadataLoaded) {
+                                    if (!b.metadataLoaded || b.cover == null) {
                                         val uri = Uri.parse(b.uriString)
+                                        val thumb = b.cover ?: resolveBookCover(b, 0.45f)
                                         if (isTextPagedFormat(b.format)) {
-                                            val secs = loadSectionsForBook(b)
-                                            val count = if (secs.isNotEmpty()) secs.size else 1
-                                            working[i] = b.copy(pageCount = count, metadataLoaded = true)
-                                            changed = true
+                                            val count = if (b.metadataLoaded) b.pageCount else {
+                                                val secs = loadSectionsForBook(b)
+                                                if (secs.isNotEmpty()) secs.size else 1
+                                            }
+                                            if (thumb != null || !b.metadataLoaded) {
+                                                working[i] = b.copy(
+                                                    pageCount = count,
+                                                    cover = thumb,
+                                                    metadataLoaded = true
+                                                )
+                                                changed = true
+                                            }
                                         } else {
-                                            val count = getPdfPageCount(context, uri)
-                                            val thumb = renderSinglePage(context, uri, 0, 0.45f)
-                                            working[i] = b.copy(
-                                                pageCount = if (count > 0) count else 1,
-                                                cover = thumb,
-                                                metadataLoaded = true
-                                            )
-                                            changed = true
+                                            val count = if (b.metadataLoaded) b.pageCount else {
+                                                val c = getPdfPageCount(context, uri)
+                                                if (c > 0) c else 1
+                                            }
+                                            if (thumb != null || !b.metadataLoaded) {
+                                                working[i] = b.copy(
+                                                    pageCount = count,
+                                                    cover = thumb,
+                                                    metadataLoaded = true
+                                                )
+                                                changed = true
+                                            }
                                         }
                                         if (changed && (i + 1) % 3 == 0) {
                                             val snapshot = working.toList()
@@ -672,7 +709,7 @@ class MainActivity : ComponentActivity() {
                             else -> "Ebooks"
                         }
 
-                        return BookItem(
+                        val initialItem = BookItem(
                             uriString = uri.toString(),
                             title = title,
                             format = detectedFormat,
@@ -685,6 +722,7 @@ class MainActivity : ComponentActivity() {
                             cover = null,
                             metadataLoaded = false
                         )
+                        return initialItem.copy(cover = resolveBookCover(initialItem, 0.45f))
                     }
 
                     fun addBookToShelf(item: BookItem) {
@@ -786,6 +824,7 @@ class MainActivity : ComponentActivity() {
 
                     fun openBook(book: BookItem) {
                         showDrawer = false
+                        showBrightnessSlider = false
                         activeBook = book
                         isLoadingReader = true
                         readerPages = listOf()
@@ -882,7 +921,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         Box(modifier = Modifier.fillMaxSize()) {
-                            WoodGrainBackground(modifier = Modifier.fillMaxSize())
+                            DarkVioletTextureBackground(modifier = Modifier.fillMaxSize())
 
                             Column(
                                 modifier = Modifier
@@ -894,8 +933,8 @@ class MainActivity : ComponentActivity() {
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
-                                    color = WoodCardElevated.copy(alpha = 0.94f),
-                                    border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.35f)),
+                                    color = VioletCardElevated.copy(alpha = 0.96f),
+                                    border = BorderStroke(1.dp, VioletGrainGlow.copy(alpha = 0.45f)),
                                     shadowElevation = 6.dp,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
@@ -908,10 +947,10 @@ class MainActivity : ComponentActivity() {
                                     ) {
                                         OutlinedButton(
                                             onClick = { showDocScanner = false },
-                                            border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.55f)),
+                                            border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.65f)),
                                             colors = ButtonDefaults.outlinedButtonColors(
-                                                containerColor = WoodCardSurface,
-                                                contentColor = WoodEspressoInk
+                                                containerColor = VioletCardSurface,
+                                                contentColor = VioletInkLight
                                             )
                                         ) {
                                             Text("← Shelf", maxLines = 1, softWrap = false, fontWeight = FontWeight.SemiBold)
@@ -920,7 +959,7 @@ class MainActivity : ComponentActivity() {
                                             text = "e-Bookish Scan Studio",
                                             style = MaterialTheme.typography.titleLarge,
                                             fontWeight = FontWeight.Bold,
-                                            color = WoodEspressoInk,
+                                            color = VioletInkLight,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f)
@@ -934,16 +973,16 @@ class MainActivity : ComponentActivity() {
                                     value = docTitle,
                                     onValueChange = { docTitle = it },
                                     modifier = Modifier.fillMaxWidth(),
-                                    label = { Text("Document Name", color = WoodMutedInk) },
+                                    label = { Text("Document Name", color = VioletInkMuted) },
                                     singleLine = true,
                                     shape = RoundedCornerShape(14.dp),
                                     colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = WoodCardElevated.copy(alpha = 0.95f),
-                                        unfocusedContainerColor = WoodCardSurface.copy(alpha = 0.92f),
-                                        focusedBorderColor = WoodAccentWalnut,
-                                        unfocusedBorderColor = WoodGrainDark.copy(alpha = 0.45f),
-                                        focusedTextColor = WoodEspressoInk,
-                                        unfocusedTextColor = WoodEspressoInk
+                                        focusedContainerColor = VioletCardElevated.copy(alpha = 0.96f),
+                                        unfocusedContainerColor = VioletCardSurface.copy(alpha = 0.94f),
+                                        focusedBorderColor = VioletAccentBright,
+                                        unfocusedBorderColor = VioletGrainGlow.copy(alpha = 0.45f),
+                                        focusedTextColor = VioletInkLight,
+                                        unfocusedTextColor = VioletInkLight
                                     )
                                 )
 
@@ -957,8 +996,8 @@ class MainActivity : ComponentActivity() {
                                         onClick = { cameraSnapLauncher.launch(null) },
                                         enabled = !isProcessingDoc,
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = WoodAccentWalnut,
-                                            contentColor = ComposeColor(0xFFFFF8EE)
+                                            containerColor = VioletAccentBright,
+                                            contentColor = VioletInkLight
                                         ),
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.weight(1f)
@@ -972,10 +1011,10 @@ class MainActivity : ComponentActivity() {
                                             )
                                         },
                                         enabled = !isProcessingDoc,
-                                        border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.55f)),
+                                        border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.65f)),
                                         colors = ButtonDefaults.outlinedButtonColors(
-                                            containerColor = WoodCardElevated.copy(alpha = 0.92f),
-                                            contentColor = WoodEspressoInk
+                                            containerColor = VioletCardElevated.copy(alpha = 0.92f),
+                                            contentColor = VioletInkLight
                                         ),
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.weight(1.3f)
@@ -998,10 +1037,10 @@ class MainActivity : ComponentActivity() {
                                         items(scanPages.indices.toList()) { idx ->
                                             OutlinedButton(
                                                 onClick = { selectedIndex = idx },
-                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.55f)),
                                                 colors = ButtonDefaults.outlinedButtonColors(
-                                                    containerColor = if (idx == safeIdx) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
-                                                    contentColor = WoodEspressoInk
+                                                    containerColor = if (idx == safeIdx) VioletCardElevated else VioletCardSurface.copy(alpha = 0.85f),
+                                                    contentColor = VioletInkLight
                                                 )
                                             ) {
                                                 Text(
@@ -1019,7 +1058,7 @@ class MainActivity : ComponentActivity() {
                                         text = "Filter (Page ${safeIdx + 1})",
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = WoodEspressoInk
+                                        color = VioletInkLight
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     LazyRow(
@@ -1033,10 +1072,10 @@ class MainActivity : ComponentActivity() {
                                                     defaultFilter = mode
                                                     updateSelectedPage { it.copy(filter = mode) }
                                                 },
-                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.55f)),
                                                 colors = ButtonDefaults.outlinedButtonColors(
-                                                    containerColor = if (isSel) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
-                                                    contentColor = WoodEspressoInk
+                                                    containerColor = if (isSel) VioletCardElevated else VioletCardSurface.copy(alpha = 0.85f),
+                                                    contentColor = VioletInkLight
                                                 )
                                             ) {
                                                 Text(
@@ -1052,8 +1091,8 @@ class MainActivity : ComponentActivity() {
 
                                     Card(
                                         shape = RoundedCornerShape(14.dp),
-                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.95f)),
-                                        border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.35f)),
+                                        colors = CardDefaults.cardColors(containerColor = VioletCardElevated.copy(alpha = 0.96f)),
+                                        border = BorderStroke(1.dp, VioletGrainGlow.copy(alpha = 0.4f)),
                                         elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -1068,7 +1107,7 @@ class MainActivity : ComponentActivity() {
                                                 Text(
                                                     text = "Live Cut Preview • Page ${safeIdx + 1}",
                                                     style = MaterialTheme.typography.labelLarge,
-                                                    color = WoodEspressoInk
+                                                    color = VioletInkLight
                                                 )
                                                 Text(
                                                     text = "Delete Page",
@@ -1098,8 +1137,8 @@ class MainActivity : ComponentActivity() {
 
                                     Card(
                                         shape = RoundedCornerShape(14.dp),
-                                        colors = CardDefaults.cardColors(containerColor = WoodCardSurface.copy(alpha = 0.94f)),
-                                        border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.3f)),
+                                        colors = CardDefaults.cardColors(containerColor = VioletCardSurface.copy(alpha = 0.95f)),
+                                        border = BorderStroke(1.dp, VioletGrainGlow.copy(alpha = 0.35f)),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Column(
@@ -1115,13 +1154,13 @@ class MainActivity : ComponentActivity() {
                                                     text = "Live Side Cut Controls",
                                                     style = MaterialTheme.typography.labelLarge,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    color = WoodEspressoInk
+                                                    color = VioletInkLight
                                                 )
                                                 OutlinedButton(
                                                     onClick = { updateSelectedPage { it.copy(crop = SideCrop()) } },
-                                                    border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f))
+                                                    border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.55f))
                                                 ) {
-                                                    Text("Reset Sides", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    Text("Reset Sides", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                 }
                                             }
 
@@ -1130,7 +1169,7 @@ class MainActivity : ComponentActivity() {
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("Left: ${(currentPage.crop.left * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = WoodEspressoInk)
+                                                Text("Left: ${(currentPage.crop.left * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = VioletInkLight)
                                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                     OutlinedButton(
                                                         onClick = {
@@ -1139,7 +1178,7 @@ class MainActivity : ComponentActivity() {
                                                         },
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text("L -", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                        Text("L -", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                     }
                                                     OutlinedButton(
                                                         onClick = {
@@ -1148,7 +1187,7 @@ class MainActivity : ComponentActivity() {
                                                         },
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text("L +", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                        Text("L +", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                     }
                                                 }
                                             }
@@ -1158,7 +1197,7 @@ class MainActivity : ComponentActivity() {
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("Right: ${(currentPage.crop.right * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = WoodEspressoInk)
+                                                Text("Right: ${(currentPage.crop.right * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = VioletInkLight)
                                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                     OutlinedButton(
                                                         onClick = {
@@ -1167,7 +1206,7 @@ class MainActivity : ComponentActivity() {
                                                         },
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text("R -", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                        Text("R -", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                     }
                                                     OutlinedButton(
                                                         onClick = {
@@ -1176,7 +1215,7 @@ class MainActivity : ComponentActivity() {
                                                         },
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text("R +", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                        Text("R +", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                     }
                                                 }
                                             }
@@ -1186,7 +1225,7 @@ class MainActivity : ComponentActivity() {
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("Top: ${(currentPage.crop.top * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = WoodEspressoInk)
+                                                Text("Top: ${(currentPage.crop.top * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = VioletInkLight)
                                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                     OutlinedButton(
                                                         onClick = {
@@ -1195,7 +1234,7 @@ class MainActivity : ComponentActivity() {
                                                         },
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text("T -", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                        Text("T -", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                     }
                                                     OutlinedButton(
                                                         onClick = {
@@ -1204,7 +1243,7 @@ class MainActivity : ComponentActivity() {
                                                         },
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text("T +", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                        Text("T +", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                     }
                                                 }
                                             }
@@ -1214,7 +1253,7 @@ class MainActivity : ComponentActivity() {
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("Bottom: ${(currentPage.crop.bottom * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = WoodEspressoInk)
+                                                Text("Bottom: ${(currentPage.crop.bottom * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = VioletInkLight)
                                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                     OutlinedButton(
                                                         onClick = {
@@ -1223,7 +1262,7 @@ class MainActivity : ComponentActivity() {
                                                         },
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text("B -", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                        Text("B -", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                     }
                                                     OutlinedButton(
                                                         onClick = {
@@ -1232,7 +1271,7 @@ class MainActivity : ComponentActivity() {
                                                         },
                                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text("B +", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                        Text("B +", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                     }
                                                 }
                                             }
@@ -1242,8 +1281,8 @@ class MainActivity : ComponentActivity() {
                                     Spacer(modifier = Modifier.height(18.dp))
                                     Card(
                                         shape = RoundedCornerShape(16.dp),
-                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.92f)),
-                                        border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.35f)),
+                                        colors = CardDefaults.cardColors(containerColor = VioletCardElevated.copy(alpha = 0.94f)),
+                                        border = BorderStroke(1.dp, VioletGrainGlow.copy(alpha = 0.4f)),
                                         elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -1256,7 +1295,7 @@ class MainActivity : ComponentActivity() {
                                             Text(
                                                 text = "Tap 'Gallery Photos' to pick from your phone gallery or 'Camera' to snap a page.",
                                                 style = MaterialTheme.typography.bodyMedium,
-                                                color = WoodEspressoInk,
+                                                color = VioletInkLight,
                                                 modifier = Modifier.padding(18.dp)
                                             )
                                         }
@@ -1314,8 +1353,8 @@ class MainActivity : ComponentActivity() {
                                         },
                                         enabled = !isProcessingDoc && scanPages.isNotEmpty(),
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = WoodAccentWalnut,
-                                            contentColor = ComposeColor(0xFFFFF8EE)
+                                            containerColor = VioletAccentBright,
+                                            contentColor = VioletInkLight
                                         ),
                                         modifier = Modifier.weight(1f)
                                     ) {
@@ -1352,8 +1391,8 @@ class MainActivity : ComponentActivity() {
                                         },
                                         enabled = !isProcessingDoc && scanPages.isNotEmpty(),
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = WoodAccentWalnut,
-                                            contentColor = ComposeColor(0xFFFFF8EE)
+                                            containerColor = VioletAccentBright,
+                                            contentColor = VioletInkLight
                                         ),
                                         modifier = Modifier.weight(1f)
                                     ) {
@@ -1368,10 +1407,10 @@ class MainActivity : ComponentActivity() {
                                             docStatus = "Cleared."
                                         },
                                         enabled = !isProcessingDoc && (scanPages.isNotEmpty() || lastExported != null),
-                                        border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                        border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.55f)),
                                         colors = ButtonDefaults.outlinedButtonColors(
-                                            containerColor = WoodCardElevated.copy(alpha = 0.9f),
-                                            contentColor = WoodEspressoInk
+                                            containerColor = VioletCardElevated.copy(alpha = 0.9f),
+                                            contentColor = VioletInkLight
                                         )
                                     ) {
                                         Text("Clear", maxLines = 1, softWrap = false)
@@ -1384,7 +1423,7 @@ class MainActivity : ComponentActivity() {
                                         text = docStatus,
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.Medium,
-                                        color = WoodEspressoInk
+                                        color = VioletInkLight
                                     )
                                 }
 
@@ -1393,7 +1432,7 @@ class MainActivity : ComponentActivity() {
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Card(
                                         shape = RoundedCornerShape(14.dp),
-                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated),
+                                        colors = CardDefaults.cardColors(containerColor = VioletCardElevated),
                                         elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
@@ -1402,7 +1441,7 @@ class MainActivity : ComponentActivity() {
                                                 text = "Scanned ${exported.format}: ${exported.title}",
                                                 style = MaterialTheme.typography.titleMedium,
                                                 fontWeight = FontWeight.Bold,
-                                                color = WoodEspressoInk
+                                                color = VioletInkLight
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
                                             Row(
@@ -1412,8 +1451,8 @@ class MainActivity : ComponentActivity() {
                                                 Button(
                                                     onClick = { shareExportedScan(context, exported) },
                                                     colors = ButtonDefaults.buttonColors(
-                                                        containerColor = WoodAccentWalnut,
-                                                        contentColor = ComposeColor(0xFFFFF8EE)
+                                                        containerColor = VioletAccentBright,
+                                                        contentColor = VioletInkLight
                                                     ),
                                                     modifier = Modifier.weight(1f)
                                                 ) {
@@ -1428,7 +1467,7 @@ class MainActivity : ComponentActivity() {
                                                         },
                                                         modifier = Modifier.weight(1f)
                                                     ) {
-                                                        Text("Read PDF", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                        Text("Read PDF", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                     }
                                                 }
                                                 OutlinedButton(
@@ -1438,7 +1477,7 @@ class MainActivity : ComponentActivity() {
                                                     },
                                                     modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text("Done", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    Text("Done", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                 }
                                             }
                                         }
@@ -1454,6 +1493,7 @@ class MainActivity : ComponentActivity() {
                             activeBook = null
                             readerPages = listOf()
                             textBookSections = listOf()
+                            showBrightnessSlider = false
                         }
 
                         var showReaderBars by remember { mutableStateOf(false) }
@@ -1558,7 +1598,10 @@ class MainActivity : ComponentActivity() {
                                             .fillMaxWidth(0.64f)
                                             .clickable {
                                                 showReaderBars = !showReaderBars
-                                                if (!showReaderBars) showAaPanel = false
+                                                if (!showReaderBars) {
+                                                    showAaPanel = false
+                                                    showBrightnessSlider = false
+                                                }
                                             }
                                     )
 
@@ -1581,7 +1624,7 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier
                                                 .align(Alignment.TopCenter)
                                                 .fillMaxWidth()
-                                                .background(ReadEraBarColor)
+                                                .background(VioletBarColor)
                                         ) {
                                             Row(
                                                 modifier = Modifier
@@ -1594,13 +1637,14 @@ class MainActivity : ComponentActivity() {
                                                     onClick = {
                                                         activeBook = null
                                                         textBookSections = listOf()
+                                                        showBrightnessSlider = false
                                                     },
-                                                    border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                    border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                 ) {
                                                     Text(
                                                         text = "← Shelf",
-                                                        color = ReadEraBarText,
+                                                        color = VioletBarText,
                                                         fontWeight = FontWeight.SemiBold,
                                                         maxLines = 1,
                                                         softWrap = false
@@ -1611,26 +1655,40 @@ class MainActivity : ComponentActivity() {
                                                     Text(
                                                         text = currentBook.title,
                                                         style = MaterialTheme.typography.titleMedium,
-                                                        color = ReadEraBarText,
+                                                        color = VioletBarText,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                     Text(
                                                         text = "${currentBook.format} • Section ${pagerState.currentPage + 1} of ${textBookSections.size}",
                                                         style = MaterialTheme.typography.labelSmall,
-                                                        color = ReadEraBarText.copy(alpha = 0.88f),
+                                                        color = VioletBarText.copy(alpha = 0.85f),
                                                         maxLines = 1
                                                     )
                                                 }
 
                                                 OutlinedButton(
+                                                    onClick = { showBrightnessSlider = !showBrightnessSlider },
+                                                    border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
+                                                    contentPadding = PaddingValues(horizontal = 9.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "☀ ${(screenBrightness * 100).toInt()}%",
+                                                        color = VioletBarText,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        softWrap = false
+                                                    )
+                                                }
+
+                                                OutlinedButton(
                                                     onClick = { showAaPanel = !showAaPanel },
-                                                    border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                    border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                 ) {
                                                     Text(
                                                         text = "Aa",
-                                                        color = ReadEraBarText,
+                                                        color = VioletBarText,
                                                         fontWeight = FontWeight.Bold,
                                                         maxLines = 1,
                                                         softWrap = false
@@ -1638,18 +1696,64 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
 
+                                            if (showBrightnessSlider) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(VioletCardElevated)
+                                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "Brightness: ${(screenBrightness * 100).toInt()}%",
+                                                        style = MaterialTheme.typography.labelLarge,
+                                                        color = VioletInkLight
+                                                    )
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                screenBrightness = (screenBrightness - 0.1f).coerceIn(0.1f, 1.0f)
+                                                                applyScreenBrightness(context, screenBrightness)
+                                                            },
+                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("☀ -", color = VioletInkLight, maxLines = 1, softWrap = false)
+                                                        }
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                screenBrightness = (screenBrightness + 0.1f).coerceIn(0.1f, 1.0f)
+                                                                applyScreenBrightness(context, screenBrightness)
+                                                            },
+                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("☀ +", color = VioletInkLight, maxLines = 1, softWrap = false)
+                                                        }
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                screenBrightness = 0.75f
+                                                                applyScreenBrightness(context, screenBrightness)
+                                                            },
+                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("75%", color = VioletInkLight, maxLines = 1, softWrap = false)
+                                                        }
+                                                    }
+                                                }
+                                            }
+
                                             if (showAaPanel) {
                                                 Column(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .background(ReadEraBarColor.copy(alpha = 0.96f))
+                                                        .background(VioletBarColor.copy(alpha = 0.98f))
                                                         .padding(horizontal = 14.dp, vertical = 8.dp),
                                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                                 ) {
                                                     Text(
                                                         text = "Page Background: ${epubPageTheme.label}",
                                                         style = MaterialTheme.typography.labelLarge,
-                                                        color = ReadEraBarText
+                                                        color = VioletBarText
                                                     )
                                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                                         items(EpubPageTheme.entries) { themeOpt ->
@@ -1665,7 +1769,7 @@ class MainActivity : ComponentActivity() {
                                                                         .background(themeOpt.bgColor)
                                                                         .border(
                                                                             width = if (isCurr) 3.dp else 1.dp,
-                                                                            color = if (isCurr) ReadEraBarText else ReadEraBarText.copy(alpha = 0.5f),
+                                                                            color = if (isCurr) VioletBarText else VioletBarText.copy(alpha = 0.5f),
                                                                             shape = CircleShape
                                                                         )
                                                                 )
@@ -1673,7 +1777,7 @@ class MainActivity : ComponentActivity() {
                                                                 Text(
                                                                     text = themeOpt.label,
                                                                     style = MaterialTheme.typography.labelSmall,
-                                                                    color = ReadEraBarText,
+                                                                    color = VioletBarText,
                                                                     maxLines = 1
                                                                 )
                                                             }
@@ -1688,22 +1792,22 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "Font Size: ${epubFontSizeSp.toInt()}sp",
                                                             style = MaterialTheme.typography.labelLarge,
-                                                            color = ReadEraBarText
+                                                            color = VioletBarText
                                                         )
                                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                             OutlinedButton(
                                                                 onClick = { epubFontSizeSp = (epubFontSizeSp - 2f).coerceAtLeast(14f) },
-                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                                border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("A-", color = ReadEraBarText, maxLines = 1, softWrap = false)
+                                                                Text("A-", color = VioletBarText, maxLines = 1, softWrap = false)
                                                             }
                                                             OutlinedButton(
                                                                 onClick = { epubFontSizeSp = (epubFontSizeSp + 2f).coerceAtMost(28f) },
-                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                                border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("A+", color = ReadEraBarText, maxLines = 1, softWrap = false)
+                                                                Text("A+", color = VioletBarText, maxLines = 1, softWrap = false)
                                                             }
                                                         }
                                                     }
@@ -1715,13 +1819,13 @@ class MainActivity : ComponentActivity() {
                                                         for (fOpt in EpubFontStyleOption.entries) {
                                                             OutlinedButton(
                                                                 onClick = { epubFontStyle = fOpt },
-                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                                border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                                 modifier = Modifier.weight(1f),
                                                                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
                                                             ) {
                                                                 Text(
                                                                     text = if (epubFontStyle == fOpt) "${fOpt.label} ✓" else fOpt.label,
-                                                                    color = ReadEraBarText,
+                                                                    color = VioletBarText,
                                                                     fontFamily = fOpt.family,
                                                                     maxLines = 1,
                                                                     softWrap = false
@@ -1738,22 +1842,22 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "Line Spacing: ${String.format(Locale.US, "%.2f", epubLineSpacingMult)}x",
                                                             style = MaterialTheme.typography.labelLarge,
-                                                            color = ReadEraBarText
+                                                            color = VioletBarText
                                                         )
                                                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                             OutlinedButton(
                                                                 onClick = { epubLineSpacingMult = (epubLineSpacingMult - 0.15f).coerceAtLeast(1.1f) },
-                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                                border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("Tighter", color = ReadEraBarText, maxLines = 1, softWrap = false)
+                                                                Text("Tighter", color = VioletBarText, maxLines = 1, softWrap = false)
                                                             }
                                                             OutlinedButton(
                                                                 onClick = { epubLineSpacingMult = (epubLineSpacingMult + 0.15f).coerceAtMost(2.0f) },
-                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                                border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("Wider", color = ReadEraBarText, maxLines = 1, softWrap = false)
+                                                                Text("Wider", color = VioletBarText, maxLines = 1, softWrap = false)
                                                             }
                                                         }
                                                     }
@@ -1766,22 +1870,22 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "Side Margins: ${epubSideMarginDp}dp",
                                                             style = MaterialTheme.typography.labelLarge,
-                                                            color = ReadEraBarText
+                                                            color = VioletBarText
                                                         )
                                                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                             OutlinedButton(
                                                                 onClick = { epubSideMarginDp = (epubSideMarginDp - 6).coerceAtLeast(12) },
-                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                                border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("Narrow", color = ReadEraBarText, maxLines = 1, softWrap = false)
+                                                                Text("Narrow", color = VioletBarText, maxLines = 1, softWrap = false)
                                                             }
                                                             OutlinedButton(
                                                                 onClick = { epubSideMarginDp = (epubSideMarginDp + 6).coerceAtMost(48) },
-                                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                                border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                             ) {
-                                                                Text("Wide", color = ReadEraBarText, maxLines = 1, softWrap = false)
+                                                                Text("Wide", color = VioletBarText, maxLines = 1, softWrap = false)
                                                             }
                                                         }
                                                     }
@@ -1799,16 +1903,16 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "Paragraph Indent: $indentLabel",
                                                             style = MaterialTheme.typography.labelLarge,
-                                                            color = ReadEraBarText
+                                                            color = VioletBarText
                                                         )
                                                         OutlinedButton(
                                                             onClick = {
                                                                 epubParagraphIndentLevel = (epubParagraphIndentLevel + 1) % 3
                                                             },
-                                                            border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                            border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                                                         ) {
-                                                            Text("Cycle Indent", color = ReadEraBarText, maxLines = 1, softWrap = false)
+                                                            Text("Cycle Indent", color = VioletBarText, maxLines = 1, softWrap = false)
                                                         }
                                                     }
                                                 }
@@ -1821,14 +1925,14 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
-                                                .background(ReadEraBarColor)
+                                                .background(VioletBarColor)
                                                 .navigationBarsPadding()
                                                 .padding(horizontal = 14.dp, vertical = 10.dp)
                                         ) {
                                             LinearProgressIndicator(
                                                 progress = progFrac,
-                                                color = ReadEraBarText,
-                                                trackColor = ReadEraBarText.copy(alpha = 0.3f),
+                                                color = VioletAccentBright,
+                                                trackColor = VioletBarText.copy(alpha = 0.25f),
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .height(4.dp)
@@ -1849,17 +1953,17 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     },
                                                     enabled = pagerState.currentPage > 0,
-                                                    border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                    border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                 ) {
-                                                    Text("Prev Sec", color = ReadEraBarText, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                                                    Text("Prev Sec", color = VioletBarText, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                                                 }
 
                                                 Text(
                                                     text = "${pagerState.currentPage + 1} of ${textBookSections.size} ($pct%)",
                                                     style = MaterialTheme.typography.labelLarge,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = ReadEraBarText
+                                                    color = VioletBarText
                                                 )
 
                                                 OutlinedButton(
@@ -1871,10 +1975,10 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     },
                                                     enabled = pagerState.currentPage < textBookSections.size - 1,
-                                                    border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
+                                                    border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                 ) {
-                                                    Text("Next Sec", color = ReadEraBarText, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                                                    Text("Next Sec", color = VioletBarText, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                                                 }
                                             }
                                         }
@@ -1885,7 +1989,7 @@ class MainActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(WoodLightBase)
+                                    .background(VioletBaseDark)
                             ) {
                                 if (isLoadingReader) {
                                     Box(
@@ -1893,9 +1997,9 @@ class MainActivity : ComponentActivity() {
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            CircularProgressIndicator(color = WoodAccentWalnut)
+                                            CircularProgressIndicator(color = VioletAccentBright)
                                             Spacer(modifier = Modifier.height(12.dp))
-                                            Text("Opening book...", color = WoodEspressoInk)
+                                            Text("Opening book...", color = VioletInkLight)
                                         }
                                     }
                                 } else if (readerPages.isEmpty()) {
@@ -1903,7 +2007,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("Could not open this PDF file.", color = WoodEspressoInk)
+                                        Text("Could not open this PDF file.", color = VioletInkLight)
                                     }
                                 } else {
                                     val maxIdx = readerPages.size - 1
@@ -1962,6 +2066,7 @@ class MainActivity : ComponentActivity() {
                                                 }
                                                 .clickable {
                                                     showReaderBars = !showReaderBars
+                                                    if (!showReaderBars) showBrightnessSlider = false
                                                 },
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -1982,33 +2087,98 @@ class MainActivity : ComponentActivity() {
                                     }
 
                                     if (showReaderBars) {
-                                        Row(
+                                        Column(
                                             modifier = Modifier
                                                 .align(Alignment.TopCenter)
                                                 .fillMaxWidth()
-                                                .background(ReadEraBarColor)
-                                                .padding(horizontal = 12.dp, vertical = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                .background(VioletBarColor)
                                         ) {
-                                            OutlinedButton(
-                                                onClick = {
-                                                    activeBook = null
-                                                    readerPages = listOf()
-                                                },
-                                                border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
-                                                Text("← Shelf", color = ReadEraBarText, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        activeBook = null
+                                                        readerPages = listOf()
+                                                        showBrightnessSlider = false
+                                                    },
+                                                    border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("← Shelf", color = VioletBarText, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                                                }
+                                                Text(
+                                                    text = currentBook.title,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = VioletBarText,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                OutlinedButton(
+                                                    onClick = { showBrightnessSlider = !showBrightnessSlider },
+                                                    border = BorderStroke(1.dp, VioletBarText.copy(alpha = 0.65f)),
+                                                    contentPadding = PaddingValues(horizontal = 9.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "☀ ${(screenBrightness * 100).toInt()}%",
+                                                        color = VioletBarText,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        softWrap = false
+                                                    )
+                                                }
                                             }
-                                            Text(
-                                                text = currentBook.title,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = ReadEraBarText,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f)
-                                            )
+
+                                            if (showBrightnessSlider) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(VioletCardElevated)
+                                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "Brightness: ${(screenBrightness * 100).toInt()}%",
+                                                        style = MaterialTheme.typography.labelLarge,
+                                                        color = VioletInkLight
+                                                    )
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                screenBrightness = (screenBrightness - 0.1f).coerceIn(0.1f, 1.0f)
+                                                                applyScreenBrightness(context, screenBrightness)
+                                                            },
+                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("☀ -", color = VioletInkLight, maxLines = 1, softWrap = false)
+                                                        }
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                screenBrightness = (screenBrightness + 0.1f).coerceIn(0.1f, 1.0f)
+                                                                applyScreenBrightness(context, screenBrightness)
+                                                            },
+                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("☀ +", color = VioletInkLight, maxLines = 1, softWrap = false)
+                                                        }
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                screenBrightness = 0.75f
+                                                                applyScreenBrightness(context, screenBrightness)
+                                                            },
+                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("75%", color = VioletInkLight, maxLines = 1, softWrap = false)
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         val pagePct = ((pagerState.currentPage + 1) * 100) / readerPages.size
@@ -2017,14 +2187,14 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
-                                                .background(ReadEraBarColor)
+                                                .background(VioletBarColor)
                                                 .navigationBarsPadding()
                                                 .padding(horizontal = 16.dp, vertical = 10.dp)
                                         ) {
                                             LinearProgressIndicator(
                                                 progress = pageFrac,
-                                                color = ReadEraBarText,
-                                                trackColor = ReadEraBarText.copy(alpha = 0.3f),
+                                                color = VioletAccentBright,
+                                                trackColor = VioletBarText.copy(alpha = 0.25f),
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .height(4.dp)
@@ -2040,13 +2210,13 @@ class MainActivity : ComponentActivity() {
                                                     text = "${pagerState.currentPage + 1} of ${readerPages.size}",
                                                     style = MaterialTheme.typography.labelLarge,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = ReadEraBarText
+                                                    color = VioletBarText
                                                 )
                                                 Text(
                                                     text = "$pagePct%",
                                                     style = MaterialTheme.typography.labelLarge,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = ReadEraBarText
+                                                    color = VioletBarText
                                                 )
                                             }
                                         }
@@ -2094,7 +2264,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         Box(modifier = Modifier.fillMaxSize()) {
-                            WoodGrainBackground(modifier = Modifier.fillMaxSize())
+                            DarkVioletTextureBackground(modifier = Modifier.fillMaxSize())
 
                             Column(
                                 modifier = Modifier
@@ -2105,8 +2275,8 @@ class MainActivity : ComponentActivity() {
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
-                                    color = WoodCardElevated.copy(alpha = 0.94f),
-                                    border = BorderStroke(1.2.dp, WoodGrainDark.copy(alpha = 0.36f)),
+                                    color = VioletCardElevated.copy(alpha = 0.96f),
+                                    border = BorderStroke(1.2.dp, VioletGrainGlow.copy(alpha = 0.45f)),
                                     shadowElevation = 6.dp,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
@@ -2125,10 +2295,10 @@ class MainActivity : ComponentActivity() {
                                             OutlinedButton(
                                                 onClick = { showDrawer = !showDrawer },
                                                 shape = RoundedCornerShape(12.dp),
-                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.55f)),
+                                                border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.65f)),
                                                 colors = ButtonDefaults.outlinedButtonColors(
-                                                    containerColor = WoodCardSurface,
-                                                    contentColor = WoodEspressoInk
+                                                    containerColor = VioletCardSurface,
+                                                    contentColor = VioletInkLight
                                                 ),
                                                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                                             ) {
@@ -2137,7 +2307,7 @@ class MainActivity : ComponentActivity() {
 
                                             ReadEraGraphicIcon(
                                                 kind = "BOOKS",
-                                                tint = WoodAccentWalnut,
+                                                tint = VioletAccentBright,
                                                 modifier = Modifier.size(24.dp)
                                             )
 
@@ -2145,7 +2315,7 @@ class MainActivity : ComponentActivity() {
                                                 text = section.label,
                                                 style = MaterialTheme.typography.titleLarge,
                                                 fontWeight = FontWeight.Bold,
-                                                color = WoodEspressoInk,
+                                                color = VioletInkLight,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -2157,10 +2327,10 @@ class MainActivity : ComponentActivity() {
                                             OutlinedButton(
                                                 onClick = { showOverflowMenu = true },
                                                 shape = RoundedCornerShape(12.dp),
-                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.55f)),
+                                                border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.65f)),
                                                 colors = ButtonDefaults.outlinedButtonColors(
-                                                    containerColor = WoodCardSurface,
-                                                    contentColor = WoodEspressoInk
+                                                    containerColor = VioletCardSurface,
+                                                    contentColor = VioletInkLight
                                                 ),
                                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                                             ) {
@@ -2170,31 +2340,31 @@ class MainActivity : ComponentActivity() {
                                             DropdownMenu(
                                                 expanded = showOverflowMenu,
                                                 onDismissRequest = { showOverflowMenu = false },
-                                                containerColor = WoodCardElevated
+                                                containerColor = VioletCardElevated
                                             ) {
                                                 DropdownMenuItem(
-                                                    text = { Text("Import Books", color = WoodEspressoInk) },
+                                                    text = { Text("Import Books", color = VioletInkLight) },
                                                     onClick = {
                                                         showOverflowMenu = false
                                                         addBookLauncher.launch(arrayOf("*/*"))
                                                     }
                                                 )
                                                 DropdownMenuItem(
-                                                    text = { Text("Scan Folder", color = WoodEspressoInk) },
+                                                    text = { Text("Scan Folder", color = VioletInkLight) },
                                                     onClick = {
                                                         showOverflowMenu = false
                                                         startFolderScan()
                                                     }
                                                 )
                                                 DropdownMenuItem(
-                                                    text = { Text("Doc Scanner", color = WoodEspressoInk) },
+                                                    text = { Text("Doc Scanner", color = VioletInkLight) },
                                                     onClick = {
                                                         showOverflowMenu = false
                                                         showDocScanner = true
                                                     }
                                                 )
                                                 DropdownMenuItem(
-                                                    text = { Text("Open a random book", color = WoodEspressoInk) },
+                                                    text = { Text("Open a random book", color = VioletInkLight) },
                                                     onClick = {
                                                         showOverflowMenu = false
                                                         if (activeBooks.isNotEmpty()) {
@@ -2205,7 +2375,7 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                 )
                                                 DropdownMenuItem(
-                                                    text = { Text("Rebuild book covers", color = WoodEspressoInk) },
+                                                    text = { Text("Rebuild book covers", color = VioletInkLight) },
                                                     onClick = {
                                                         showOverflowMenu = false
                                                         rebuildAllCovers()
@@ -2215,7 +2385,7 @@ class MainActivity : ComponentActivity() {
                                                     text = {
                                                         Text(
                                                             text = if (selectionMode) "Cancel selection" else "Select all",
-                                                            color = WoodEspressoInk
+                                                            color = VioletInkLight
                                                         )
                                                     },
                                                     onClick = {
@@ -2240,10 +2410,10 @@ class MainActivity : ComponentActivity() {
                                         items(listOf("ALL", "PDF", "EPUB", "MOBI", "AZW", "AZW3", "FB2", "TXT", "DOCX")) { fmt ->
                                             OutlinedButton(
                                                 onClick = { formatFilter = fmt },
-                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.55f)),
                                                 colors = ButtonDefaults.outlinedButtonColors(
-                                                    containerColor = if (formatFilter == fmt) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
-                                                    contentColor = WoodEspressoInk
+                                                    containerColor = if (formatFilter == fmt) VioletCardElevated else VioletCardSurface.copy(alpha = 0.88f),
+                                                    contentColor = VioletInkLight
                                                 )
                                             ) {
                                                 Text(if (formatFilter == fmt) "$fmt ✓" else fmt, maxLines = 1, softWrap = false)
@@ -2257,10 +2427,10 @@ class MainActivity : ComponentActivity() {
                                         items(authorList) { auth ->
                                             OutlinedButton(
                                                 onClick = { authorFilter = auth },
-                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.55f)),
                                                 colors = ButtonDefaults.outlinedButtonColors(
-                                                    containerColor = if (authorFilter == auth) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
-                                                    contentColor = WoodEspressoInk
+                                                    containerColor = if (authorFilter == auth) VioletCardElevated else VioletCardSurface.copy(alpha = 0.88f),
+                                                    contentColor = VioletInkLight
                                                 )
                                             ) {
                                                 Text(if (authorFilter == auth) "$auth ✓" else auth, maxLines = 1, softWrap = false)
@@ -2274,10 +2444,10 @@ class MainActivity : ComponentActivity() {
                                         items(colList) { col ->
                                             OutlinedButton(
                                                 onClick = { collectionFilter = col },
-                                                border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
+                                                border = BorderStroke(1.dp, VioletAccentBright.copy(alpha = 0.55f)),
                                                 colors = ButtonDefaults.outlinedButtonColors(
-                                                    containerColor = if (collectionFilter == col) WoodCardElevated else WoodCardSurface.copy(alpha = 0.85f),
-                                                    contentColor = WoodEspressoInk
+                                                    containerColor = if (collectionFilter == col) VioletCardElevated else VioletCardSurface.copy(alpha = 0.88f),
+                                                    contentColor = VioletInkLight
                                                 )
                                             ) {
                                                 Text(if (collectionFilter == col) "$col ✓" else col, maxLines = 1, softWrap = false)
@@ -2288,21 +2458,21 @@ class MainActivity : ComponentActivity() {
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Card(
                                         shape = RoundedCornerShape(14.dp),
-                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.94f)),
-                                        border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.35f)),
+                                        colors = CardDefaults.cardColors(containerColor = VioletCardElevated.copy(alpha = 0.96f)),
+                                        border = BorderStroke(1.dp, VioletGrainGlow.copy(alpha = 0.4f)),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Column(
                                             modifier = Modifier.padding(14.dp),
                                             verticalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            Text("e-Bookish Reader & Library Settings", fontWeight = FontWeight.Bold, color = WoodEspressoInk)
+                                            Text("e-Bookish Reader & Library Settings", fontWeight = FontWeight.Bold, color = VioletInkLight)
                                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 OutlinedButton(onClick = { isDarkTheme = !isDarkTheme }) {
-                                                    Text(if (isDarkTheme) "Oak: Warm" else "Oak: Light", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    Text(if (isDarkTheme) "Violet: Deep" else "Violet: Plum", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                 }
                                                 OutlinedButton(onClick = { useDefaultCovers = !useDefaultCovers }) {
-                                                    Text(if (useDefaultCovers) "Default Cover: ON" else "Default Cover: OFF", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                    Text(if (useDefaultCovers) "Default Cover: ON" else "Default Cover: OFF", maxLines = 1, softWrap = false, color = VioletInkLight)
                                                 }
                                             }
                                         }
@@ -2319,7 +2489,7 @@ class MainActivity : ComponentActivity() {
                                         Text(
                                             text = "${selectedUris.size} selected",
                                             style = MaterialTheme.typography.labelLarge,
-                                            color = WoodEspressoInk,
+                                            color = VioletInkLight,
                                             modifier = Modifier.weight(1f)
                                         )
                                         OutlinedButton(
@@ -2341,7 +2511,7 @@ class MainActivity : ComponentActivity() {
                                                 text = if (section == ReadEraSection.TRASH) "Delete Forever" else "Move to Trash",
                                                 maxLines = 1,
                                                 softWrap = false,
-                                                color = WoodEspressoInk
+                                                color = VioletInkLight
                                             )
                                         }
                                     }
@@ -2353,7 +2523,7 @@ class MainActivity : ComponentActivity() {
                                         text = scanNotice,
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.Medium,
-                                        color = WoodEspressoInk
+                                        color = VioletInkLight
                                     )
                                 }
 
@@ -2363,16 +2533,16 @@ class MainActivity : ComponentActivity() {
                                     value = searchQuery,
                                     onValueChange = { searchQuery = it },
                                     modifier = Modifier.fillMaxWidth(),
-                                    placeholder = { Text("Search in ${section.label}...", maxLines = 1, color = WoodMutedInk) },
+                                    placeholder = { Text("Search in ${section.label}...", maxLines = 1, color = VioletInkMuted) },
                                     singleLine = true,
                                     shape = RoundedCornerShape(14.dp),
                                     colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = WoodCardElevated.copy(alpha = 0.95f),
-                                        unfocusedContainerColor = WoodCardSurface.copy(alpha = 0.92f),
-                                        focusedBorderColor = WoodAccentWalnut,
-                                        unfocusedBorderColor = WoodGrainDark.copy(alpha = 0.45f),
-                                        focusedTextColor = WoodEspressoInk,
-                                        unfocusedTextColor = WoodEspressoInk
+                                        focusedContainerColor = VioletCardElevated.copy(alpha = 0.96f),
+                                        unfocusedContainerColor = VioletCardSurface.copy(alpha = 0.94f),
+                                        focusedBorderColor = VioletAccentBright,
+                                        unfocusedBorderColor = VioletGrainGlow.copy(alpha = 0.45f),
+                                        focusedTextColor = VioletInkLight,
+                                        unfocusedTextColor = VioletInkLight
                                     )
                                 )
 
@@ -2381,23 +2551,23 @@ class MainActivity : ComponentActivity() {
                                 if (showAboutDialog) {
                                     Card(
                                         shape = RoundedCornerShape(14.dp),
-                                        colors = CardDefaults.cardColors(containerColor = WoodCardElevated),
+                                        colors = CardDefaults.cardColors(containerColor = VioletCardElevated),
                                         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(bottom = 14.dp)
                                     ) {
                                         Column(modifier = Modifier.padding(14.dp)) {
-                                            Text("e-Bookish", fontWeight = FontWeight.Bold, color = WoodEspressoInk)
+                                            Text("e-Bookish", fontWeight = FontWeight.Bold, color = VioletInkLight)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "Supports PDF, EPUB, MOBI, AZW/AZW3, FB2, TXT, and DOCX plus Folder Scanner, Trash & Restore, and Document Scanner.",
+                                                text = "Supports PDF, EPUB, MOBI, AZW/AZW3, FB2, TXT, and DOCX with embedded cover extraction, brightness control, and Document Scanner.",
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = WoodMutedInk
+                                                color = VioletInkMuted
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
                                             OutlinedButton(onClick = { showAboutDialog = false }) {
-                                                Text("Close", maxLines = 1, softWrap = false, color = WoodEspressoInk)
+                                                Text("Close", maxLines = 1, softWrap = false, color = VioletInkLight)
                                             }
                                         }
                                     }
@@ -2410,8 +2580,8 @@ class MainActivity : ComponentActivity() {
                                     ) {
                                         Card(
                                             shape = RoundedCornerShape(18.dp),
-                                            colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.92f)),
-                                            border = BorderStroke(1.2.dp, WoodGrainDark.copy(alpha = 0.35f)),
+                                            colors = CardDefaults.cardColors(containerColor = VioletCardElevated.copy(alpha = 0.94f)),
+                                            border = BorderStroke(1.2.dp, VioletGrainGlow.copy(alpha = 0.4f)),
                                             elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -2423,7 +2593,7 @@ class MainActivity : ComponentActivity() {
                                             ) {
                                                 ReadEraGraphicIcon(
                                                     kind = "BOOKS",
-                                                    tint = WoodAccentWalnut,
+                                                    tint = VioletAccentBright,
                                                     modifier = Modifier.size(36.dp)
                                                 )
                                                 Spacer(modifier = Modifier.height(12.dp))
@@ -2436,7 +2606,7 @@ class MainActivity : ComponentActivity() {
                                                         "No books in '${section.label}'."
                                                     },
                                                     style = MaterialTheme.typography.bodyLarge,
-                                                    color = WoodEspressoInk
+                                                    color = VioletInkLight
                                                 )
                                             }
                                         }
@@ -2454,6 +2624,7 @@ class MainActivity : ComponentActivity() {
                                             val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
                                             val percent = (progress * 100).toInt()
                                             val isChecked = book.uriString in selectedUris
+                                            val coverBmp = if (useDefaultCovers) null else (book.cover ?: coverBitmapCache[book.uriString])
 
                                             Card(
                                                 modifier = Modifier
@@ -2466,23 +2637,34 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     },
                                                 shape = RoundedCornerShape(14.dp),
-                                                colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.96f)),
-                                                border = BorderStroke(1.dp, WoodGrainDark.copy(alpha = 0.3f)),
+                                                colors = CardDefaults.cardColors(containerColor = VioletCardElevated.copy(alpha = 0.96f)),
+                                                border = BorderStroke(1.dp, VioletGrainGlow.copy(alpha = 0.35f)),
                                                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                                             ) {
                                                 Row(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .padding(14.dp),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                        .padding(12.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
+                                                    if (coverBmp != null) {
+                                                        Image(
+                                                            bitmap = coverBmp.asImageBitmap(),
+                                                            contentDescription = book.title,
+                                                            modifier = Modifier
+                                                                .width(46.dp)
+                                                                .height(64.dp)
+                                                                .clip(RoundedCornerShape(6.dp)),
+                                                            contentScale = ContentScale.Crop
+                                                        )
+                                                    }
                                                     Column(modifier = Modifier.weight(1f)) {
                                                         Text(
                                                             text = (if (book.isFavorite) "★ " else "") + book.title,
                                                             style = MaterialTheme.typography.bodyLarge,
                                                             fontWeight = FontWeight.SemiBold,
-                                                            color = WoodEspressoInk,
+                                                            color = VioletInkLight,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
                                                         )
@@ -2490,25 +2672,24 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = "${book.format} • $percent% • ${book.pageCount}p",
                                                             style = MaterialTheme.typography.bodySmall,
-                                                            color = WoodMutedInk
+                                                            color = VioletInkMuted
                                                         )
                                                         Spacer(modifier = Modifier.height(6.dp))
                                                         LinearProgressIndicator(
                                                             progress = progress,
-                                                            color = WoodAccentWalnut,
-                                                            trackColor = WoodGrainDark.copy(alpha = 0.22f),
+                                                            color = VioletAccentBright,
+                                                            trackColor = VioletGrainGlow.copy(alpha = 0.25f),
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(4.dp)
                                                                 .clip(RoundedCornerShape(2.dp))
                                                         )
                                                     }
-                                                    Spacer(modifier = Modifier.width(10.dp))
                                                     if (book.isTrashed) {
                                                         Text(
                                                             text = "Restore",
                                                             style = MaterialTheme.typography.labelMedium,
-                                                            color = WoodAccentWalnut,
+                                                            color = VioletAccentBright,
                                                             fontWeight = FontWeight.Bold,
                                                             modifier = Modifier.clickable {
                                                                 val updated = books.map {
@@ -2522,7 +2703,7 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = if (book.isFavorite) "Fav ✓" else "Fav",
                                                             style = MaterialTheme.typography.labelMedium,
-                                                            color = WoodAccentWalnut,
+                                                            color = VioletAccentBright,
                                                             fontWeight = FontWeight.Bold,
                                                             modifier = Modifier.clickable {
                                                                 val updated = books.map {
@@ -2553,6 +2734,7 @@ class MainActivity : ComponentActivity() {
                                             val progress = if (rawProg < 0f) 0f else if (rawProg > 1f) 1f else rawProg
                                             val percent = (progress * 100).toInt()
                                             val isChecked = book.uriString in selectedUris
+                                            val coverBmp = if (useDefaultCovers) null else (book.cover ?: coverBitmapCache[book.uriString])
 
                                             Card(
                                                 modifier = Modifier
@@ -2565,10 +2747,10 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     },
                                                 shape = RoundedCornerShape(10.dp),
-                                                colors = CardDefaults.cardColors(containerColor = WoodCardElevated.copy(alpha = 0.96f)),
+                                                colors = CardDefaults.cardColors(containerColor = VioletCardElevated.copy(alpha = 0.96f)),
                                                 border = BorderStroke(
                                                     width = if (selectionMode && isChecked) 2.dp else 1.dp,
-                                                    color = if (selectionMode && isChecked) WoodAccentWalnut else WoodGrainDark.copy(alpha = 0.32f)
+                                                    color = if (selectionMode && isChecked) VioletAccentBright else VioletGrainGlow.copy(alpha = 0.35f)
                                                 ),
                                                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
                                             ) {
@@ -2577,10 +2759,9 @@ class MainActivity : ComponentActivity() {
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .aspectRatio(0.70f)
-                                                            .background(WoodCardSurface),
+                                                            .background(VioletCardSurface),
                                                         contentAlignment = Alignment.Center
                                                     ) {
-                                                        val coverBmp = if (useDefaultCovers) null else book.cover
                                                         if (coverBmp != null) {
                                                             Image(
                                                                 bitmap = coverBmp.asImageBitmap(),
@@ -2597,13 +2778,13 @@ class MainActivity : ComponentActivity() {
                                                                     text = book.format,
                                                                     style = MaterialTheme.typography.titleMedium,
                                                                     fontWeight = FontWeight.Bold,
-                                                                    color = WoodAccentWalnut
+                                                                    color = VioletAccentBright
                                                                 )
                                                                 Spacer(modifier = Modifier.height(6.dp))
                                                                 Text(
                                                                     text = book.title,
                                                                     style = MaterialTheme.typography.bodySmall,
-                                                                    color = WoodEspressoInk,
+                                                                    color = VioletInkLight,
                                                                     maxLines = 3,
                                                                     overflow = TextOverflow.Ellipsis
                                                                 )
@@ -2613,8 +2794,8 @@ class MainActivity : ComponentActivity() {
 
                                                     LinearProgressIndicator(
                                                         progress = progress,
-                                                        color = WoodAccentWalnut,
-                                                        trackColor = WoodGrainDark.copy(alpha = 0.2f),
+                                                        color = VioletAccentBright,
+                                                        trackColor = VioletGrainGlow.copy(alpha = 0.25f),
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .height(3.dp)
@@ -2630,7 +2811,7 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = if (book.isFavorite) "★ $percent%" else "$percent%",
                                                             style = MaterialTheme.typography.labelSmall,
-                                                            color = WoodEspressoInk,
+                                                            color = VioletInkLight,
                                                             maxLines = 1,
                                                             softWrap = false,
                                                             modifier = Modifier.clickable {
@@ -2644,7 +2825,7 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = book.title,
                                                             style = MaterialTheme.typography.labelSmall,
-                                                            color = WoodEspressoInk,
+                                                            color = VioletInkLight,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis,
                                                             modifier = Modifier
@@ -2654,7 +2835,7 @@ class MainActivity : ComponentActivity() {
                                                         Text(
                                                             text = if (book.isTrashed) "Rest" else "Bin",
                                                             style = MaterialTheme.typography.labelSmall,
-                                                            color = if (book.isTrashed) WoodAccentWalnut else MaterialTheme.colorScheme.error,
+                                                            color = if (book.isTrashed) VioletAccentBright else MaterialTheme.colorScheme.error,
                                                             maxLines = 1,
                                                             softWrap = false,
                                                             modifier = Modifier.clickable {
@@ -2680,7 +2861,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .fillMaxWidth(0.78f)
                                             .fillMaxHeight(),
-                                        color = WoodCardElevated,
+                                        color = VioletCardElevated,
                                         shadowElevation = 14.dp
                                     ) {
                                         Column(
@@ -2700,18 +2881,18 @@ class MainActivity : ComponentActivity() {
                                             ) {
                                                 ReadEraGraphicIcon(
                                                     kind = "BOOKS",
-                                                    tint = WoodAccentWalnut,
+                                                    tint = VioletAccentBright,
                                                     modifier = Modifier.size(28.dp)
                                                 )
                                                 Text(
                                                     text = "e-Bookish",
                                                     style = MaterialTheme.typography.titleLarge,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = WoodEspressoInk
+                                                    color = VioletInkLight
                                                 )
                                             }
 
-                                            HorizontalDivider(color = WoodGrainDark.copy(alpha = 0.25f))
+                                            HorizontalDivider(color = VioletGrainGlow.copy(alpha = 0.3f))
 
                                             @Composable
                                             fun DrawerNavRow(
@@ -2720,12 +2901,12 @@ class MainActivity : ComponentActivity() {
                                                 active: Boolean = false,
                                                 onClick: () -> Unit
                                             ) {
-                                                val rowTint = if (active) WoodAccentWalnut else WoodMutedInk
+                                                val rowTint = if (active) VioletAccentBright else VioletInkMuted
                                                 Row(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .background(
-                                                            if (active) WoodCardSurface else ComposeColor.Transparent
+                                                            if (active) VioletCardSurface else ComposeColor.Transparent
                                                         )
                                                         .clickable { onClick() }
                                                         .padding(horizontal = 18.dp, vertical = 12.dp),
@@ -2737,7 +2918,7 @@ class MainActivity : ComponentActivity() {
                                                         text = label,
                                                         style = MaterialTheme.typography.bodyLarge,
                                                         fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                                                        color = if (active) WoodAccentWalnut else WoodEspressoInk,
+                                                        color = if (active) VioletAccentBright else VioletInkLight,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
@@ -2797,7 +2978,7 @@ class MainActivity : ComponentActivity() {
                                                 showDrawer = false
                                             }
 
-                                            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = WoodGrainDark.copy(alpha = 0.25f))
+                                            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = VioletGrainGlow.copy(alpha = 0.3f))
 
                                             DrawerNavRow("Settings", "SETTINGS", section == ReadEraSection.SETTINGS) {
                                                 section = ReadEraSection.SETTINGS
@@ -2822,7 +3003,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxHeight()
-                                            .background(WoodEspressoInk.copy(alpha = 0.45f))
+                                            .background(ComposeColor.Black.copy(alpha = 0.52f))
                                             .clickable { showDrawer = false }
                                     )
                                 }
@@ -2832,6 +3013,127 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun extractEpubCoverBitmap(context: Context, uri: Uri): Bitmap? {
+        return try {
+            var fallbackImageBytes: ByteArray? = null
+            var priorityImageBytes: ByteArray? = null
+
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                ZipInputStream(inputStream).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory) {
+                            val nameLower = entry.name.lowercase()
+                            val isImg = nameLower.endsWith(".jpg") ||
+                                nameLower.endsWith(".jpeg") ||
+                                nameLower.endsWith(".png") ||
+                                nameLower.endsWith(".webp")
+                            if (isImg) {
+                                val bytes = zip.readBytes()
+                                if (bytes.size > 1500) {
+                                    if (nameLower.contains("cover") || nameLower.contains("title") || nameLower.contains("front")) {
+                                        if (priorityImageBytes == null || bytes.size > priorityImageBytes!!.size) {
+                                            priorityImageBytes = bytes
+                                        }
+                                    } else if (fallbackImageBytes == null) {
+                                        fallbackImageBytes = bytes
+                                    }
+                                }
+                            }
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                }
+            }
+            val chosen = priorityImageBytes ?: fallbackImageBytes ?: return null
+            decodeScaledCover(chosen)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun extractMobiAzwCoverBitmap(context: Context, uri: Uri): Bitmap? {
+        return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            if (bytes.size < 32) return null
+
+            // 1) Check embedded KF8/ZIP archive first
+            val zipIdx = findSubsequence(bytes, byteArrayOf(0x50, 0x4B, 0x03, 0x04))
+            if (zipIdx >= 0 && zipIdx < bytes.size - 16) {
+                var bestZipImg: ByteArray? = null
+                ZipInputStream(bytes.copyOfRange(zipIdx, bytes.size).inputStream()).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory) {
+                            val n = entry.name.lowercase()
+                            if (n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png")) {
+                                val imgBytes = zip.readBytes()
+                                if (imgBytes.size > 2000 && (bestZipImg == null || imgBytes.size > bestZipImg!!.size)) {
+                                    bestZipImg = imgBytes
+                                }
+                            }
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                }
+                if (bestZipImg != null) return decodeScaledCover(bestZipImg!!)
+            }
+
+            // 2) Scan binary payload for embedded JPEG (FF D8 FF) or PNG (89 50 4E 47) header
+            val jpgStart = findSubsequence(bytes, byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()))
+            if (jpgStart >= 0 && jpgStart < bytes.size - 128) {
+                val endMarker = findSubsequenceFrom(bytes, byteArrayOf(0xFF.toByte(), 0xD9.toByte()), jpgStart + 4)
+                val endIdx = if (endMarker > jpgStart) endMarker + 2 else bytes.size
+                val jpgSlice = bytes.copyOfRange(jpgStart, endIdx)
+                decodeScaledCover(jpgSlice)?.let { return it }
+            }
+
+            val pngStart = findSubsequence(bytes, byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
+            if (pngStart >= 0 && pngStart < bytes.size - 128) {
+                val pngSlice = bytes.copyOfRange(pngStart, bytes.size)
+                decodeScaledCover(pngSlice)?.let { return it }
+            }
+
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun decodeScaledCover(bytes: ByteArray): Bitmap? {
+        val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        val maxSide = 480
+        val w = raw.width
+        val h = raw.height
+        if (w <= 1 || h <= 1) return null
+        if (w <= maxSide && h <= maxSide) return raw
+        return if (w >= h) {
+            val newH = ((h.toFloat() / w.toFloat()) * maxSide).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(raw, maxSide, newH, true)
+        } else {
+            val newW = ((w.toFloat() / h.toFloat()) * maxSide).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(raw, newW, maxSide, true)
+        }
+    }
+
+    private fun findSubsequenceFrom(haystack: ByteArray, needle: ByteArray, startFrom: Int): Int {
+        if (needle.isEmpty() || haystack.size < needle.size) return -1
+        val safeStart = startFrom.coerceAtLeast(0)
+        for (i in safeStart..(haystack.size - needle.size)) {
+            var match = true
+            for (j in needle.indices) {
+                if (haystack[i + j] != needle[j]) {
+                    match = false
+                    break
+                }
+            }
+            if (match) return i
+        }
+        return -1
     }
 
     private fun shareExportedScan(context: Context, exported: ExportedScanResult) {
@@ -3141,7 +3443,6 @@ class MainActivity : ComponentActivity() {
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return listOf()
             if (bytes.isEmpty()) return listOf()
 
-            // Check if KF8 / AZW3 contains an embedded EPUB/ZIP structure
             val zipSignatureIdx = findSubsequence(bytes, byteArrayOf(0x50, 0x4B, 0x03, 0x04))
             if (zipSignatureIdx >= 0 && zipSignatureIdx < bytes.size - 16) {
                 val subBytes = bytes.copyOfRange(zipSignatureIdx, bytes.size)
@@ -3166,7 +3467,6 @@ class MainActivity : ComponentActivity() {
                 if (embeddedChapters.isNotEmpty()) return embeddedChapters
             }
 
-            // Extract readable text runs from PalmDOC / MOBI / AZW binary payload
             val sb = StringBuilder()
             var runStart = -1
             for (i in bytes.indices) {
