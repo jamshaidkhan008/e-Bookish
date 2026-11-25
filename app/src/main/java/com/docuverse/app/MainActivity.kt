@@ -116,6 +116,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.charset.Charset
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -245,6 +246,38 @@ private val WoodyWarmScheme = darkColorScheme(
     error = ComposeColor(0xFF9E2A22)
 )
 
+private fun isTextPagedFormat(format: String): Boolean {
+    return format in setOf("EPUB", "MOBI", "AZW", "AZW3", "FB2", "TXT", "DOCX")
+}
+
+private fun detectBookFormat(fileName: String, mimeType: String): String? {
+    val lower = fileName.lowercase()
+    val mime = mimeType.lowercase()
+    return when {
+        lower.endsWith(".pdf") || mime.contains("pdf") -> "PDF"
+        lower.endsWith(".epub") || mime.contains("epub") -> "EPUB"
+        lower.endsWith(".azw3") -> "AZW3"
+        lower.endsWith(".azw") -> "AZW"
+        lower.endsWith(".mobi") || mime.contains("mobipocket") -> "MOBI"
+        lower.endsWith(".fb2") || mime.contains("fictionbook") -> "FB2"
+        lower.endsWith(".docx") || mime.contains("wordprocessingml") -> "DOCX"
+        lower.endsWith(".txt") || mime.startsWith("text/plain") -> "TXT"
+        else -> null
+    }
+}
+
+private fun stripBookExtension(rawName: String): String {
+    return rawName
+        .removeSuffix(".pdf").removeSuffix(".PDF")
+        .removeSuffix(".epub").removeSuffix(".EPUB")
+        .removeSuffix(".mobi").removeSuffix(".MOBI")
+        .removeSuffix(".azw3").removeSuffix(".AZW3")
+        .removeSuffix(".azw").removeSuffix(".AZW")
+        .removeSuffix(".fb2").removeSuffix(".FB2")
+        .removeSuffix(".txt").removeSuffix(".TXT")
+        .removeSuffix(".docx").removeSuffix(".DOCX")
+}
+
 @Composable
 private fun WoodGrainBackground(modifier: Modifier = Modifier) {
     Box(
@@ -269,7 +302,6 @@ private fun WoodGrainBackground(modifier: Modifier = Modifier) {
                 val topY = p * plankH
                 val phase = p * 1.35f
 
-                // Subtle wood fiber wave lines inside each plank
                 val fiberCount = 7
                 for (f in 0 until fiberCount) {
                     val baseOffset = topY + plankH * ((f + 0.5f) / fiberCount)
@@ -288,7 +320,6 @@ private fun WoodGrainBackground(modifier: Modifier = Modifier) {
                     )
                 }
 
-                // Plank seam with soft highlight & shadow for tactile woodwork feel
                 if (p > 0) {
                     drawLine(
                         color = WoodGrainDark.copy(alpha = 0.34f),
@@ -454,6 +485,42 @@ private fun applyParagraphIndent(text: String, indentLevel: Int): String {
     }
 }
 
+private fun splitTextIntoSections(rawText: String, chunkSize: Int = 3600): List<String> {
+    val cleaned = rawText.replace("\r\n", "\n").replace(Regex("\n{3,}"), "\n\n").trim()
+    if (cleaned.isEmpty()) return listOf()
+    val paragraphs = cleaned.split("\n\n")
+    val sections = mutableListOf<String>()
+    val sb = StringBuilder()
+
+    for (p in paragraphs) {
+        val part = p.trim()
+        if (part.isEmpty()) continue
+        if (part.length > chunkSize) {
+            if (sb.isNotEmpty()) {
+                sections.add(sb.toString().trim())
+                sb.clear()
+            }
+            var idx = 0
+            while (idx < part.length) {
+                val end = (idx + chunkSize).coerceAtMost(part.length)
+                sections.add(part.substring(idx, end).trim())
+                idx = end
+            }
+        } else {
+            if (sb.length + part.length + 2 > chunkSize && sb.isNotEmpty()) {
+                sections.add(sb.toString().trim())
+                sb.clear()
+            }
+            if (sb.isNotEmpty()) sb.append("\n\n")
+            sb.append(part)
+        }
+    }
+    if (sb.isNotEmpty()) {
+        sections.add(sb.toString().trim())
+    }
+    return sections
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -498,8 +565,20 @@ class MainActivity : ComponentActivity() {
 
                     var activeBook by remember { mutableStateOf<BookItem?>(null) }
                     var readerPages by remember { mutableStateOf(listOf<Bitmap>()) }
-                    var epubChapters by remember { mutableStateOf(listOf<String>()) }
+                    var textBookSections by remember { mutableStateOf(listOf<String>()) }
                     var isLoadingReader by remember { mutableStateOf(false) }
+
+                    fun loadSectionsForBook(book: BookItem): List<String> {
+                        val uri = Uri.parse(book.uriString)
+                        return when (book.format) {
+                            "EPUB" -> extractEpubChapters(context, uri)
+                            "FB2" -> extractFb2Sections(context, uri)
+                            "TXT" -> extractTxtSections(context, uri)
+                            "DOCX" -> extractDocxSections(context, uri)
+                            "MOBI", "AZW", "AZW3" -> extractMobiAzwSections(context, uri)
+                            else -> listOf()
+                        }
+                    }
 
                     fun rebuildAllCovers() {
                         scanNotice = "Rebuilding book covers..."
@@ -517,9 +596,9 @@ class MainActivity : ComponentActivity() {
                                         metadataLoaded = true
                                     )
                                 } else {
-                                    val chapters = extractEpubChapters(context, Uri.parse(b.uriString))
+                                    val secs = loadSectionsForBook(b)
                                     working[i] = b.copy(
-                                        pageCount = if (chapters.isNotEmpty()) chapters.size else b.pageCount.coerceAtLeast(1),
+                                        pageCount = if (secs.isNotEmpty()) secs.size else b.pageCount.coerceAtLeast(1),
                                         metadataLoaded = true
                                     )
                                 }
@@ -544,9 +623,9 @@ class MainActivity : ComponentActivity() {
                                     val b = working[i]
                                     if (!b.metadataLoaded) {
                                         val uri = Uri.parse(b.uriString)
-                                        if (b.format == "EPUB") {
-                                            val chapters = extractEpubChapters(context, uri)
-                                            val count = if (chapters.isNotEmpty()) chapters.size else 1
+                                        if (isTextPagedFormat(b.format)) {
+                                            val secs = loadSectionsForBook(b)
+                                            val count = if (secs.isNotEmpty()) secs.size else 1
                                             working[i] = b.copy(pageCount = count, metadataLoaded = true)
                                             changed = true
                                         } else {
@@ -584,27 +663,25 @@ class MainActivity : ComponentActivity() {
                         }
 
                         val rawName = knownName ?: getRawFileName(context, uri)
-                        val lower = rawName.lowercase()
-                        val mime = context.contentResolver.getType(uri)?.lowercase() ?: ""
-                        val isEpub = lower.endsWith(".epub") || mime.contains("epub")
-                        val isPdf = lower.endsWith(".pdf") || mime.contains("pdf")
-
-                        if (!isEpub && !isPdf) return null
-
-                        val title = rawName
-                            .removeSuffix(".pdf").removeSuffix(".PDF")
-                            .removeSuffix(".epub").removeSuffix(".EPUB")
+                        val mime = context.contentResolver.getType(uri) ?: ""
+                        val detectedFormat = detectBookFormat(rawName, mime) ?: return null
+                        val title = stripBookExtension(rawName)
+                        val defaultCollection = when (detectedFormat) {
+                            "PDF" -> "Documents"
+                            "TXT", "DOCX" -> "Notes & Docs"
+                            else -> "Ebooks"
+                        }
 
                         return BookItem(
                             uriString = uri.toString(),
                             title = title,
-                            format = if (isEpub) "EPUB" else "PDF",
+                            format = detectedFormat,
                             pageCount = 1,
                             lastPage = 0,
                             isFavorite = false,
                             isTrashed = false,
                             author = if (title.contains(" - ")) title.substringBefore(" - ").trim() else "Library",
-                            collection = if (isEpub) "Ebooks" else "Documents",
+                            collection = defaultCollection,
                             cover = null,
                             metadataLoaded = false
                         )
@@ -712,12 +789,12 @@ class MainActivity : ComponentActivity() {
                         activeBook = book
                         isLoadingReader = true
                         readerPages = listOf()
-                        epubChapters = listOf()
+                        textBookSections = listOf()
                         Thread {
-                            if (book.format == "EPUB") {
-                                val chapters = extractEpubChapters(context, Uri.parse(book.uriString))
+                            if (isTextPagedFormat(book.format)) {
+                                val secs = loadSectionsForBook(book)
                                 runOnUiThread {
-                                    epubChapters = chapters
+                                    textBookSections = secs
                                     isLoadingReader = false
                                 }
                             } else {
@@ -1376,13 +1453,13 @@ class MainActivity : ComponentActivity() {
                         BackHandler {
                             activeBook = null
                             readerPages = listOf()
-                            epubChapters = listOf()
+                            textBookSections = listOf()
                         }
 
                         var showReaderBars by remember { mutableStateOf(false) }
                         var showAaPanel by remember { mutableStateOf(false) }
 
-                        if (currentBook.format == "EPUB") {
+                        if (isTextPagedFormat(currentBook.format)) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1396,18 +1473,22 @@ class MainActivity : ComponentActivity() {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             CircularProgressIndicator(color = epubPageTheme.textColor)
                                             Spacer(modifier = Modifier.height(10.dp))
-                                            Text("Opening book...", color = epubPageTheme.textColor)
+                                            Text("Opening ${currentBook.format}...", color = epubPageTheme.textColor)
                                         }
                                     }
-                                } else if (epubChapters.isEmpty()) {
+                                } else if (textBookSections.isEmpty()) {
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("Could not read readable text from this EPUB.", color = epubPageTheme.textColor)
+                                        Text(
+                                            text = "Could not extract readable text from this ${currentBook.format} file.",
+                                            color = epubPageTheme.textColor,
+                                            modifier = Modifier.padding(20.dp)
+                                        )
                                     }
                                 } else {
-                                    val maxIdx = epubChapters.size - 1
+                                    val maxIdx = textBookSections.size - 1
                                     val safeStart = if (currentBook.lastPage < 0) {
                                         0
                                     } else if (currentBook.lastPage > maxIdx) {
@@ -1417,7 +1498,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     val pagerState = rememberPagerState(
                                         initialPage = safeStart,
-                                        pageCount = { epubChapters.size }
+                                        pageCount = { textBookSections.size }
                                     )
 
                                     LaunchedEffect(pagerState.currentPage) {
@@ -1443,8 +1524,8 @@ class MainActivity : ComponentActivity() {
                                                 .padding(horizontal = epubSideMarginDp.dp, vertical = 22.dp)
                                         ) {
                                             val computedLineSp = (epubFontSizeSp * epubLineSpacingMult).sp
-                                            val formattedChapter = remember(epubChapters[chapIndex], epubParagraphIndentLevel) {
-                                                applyParagraphIndent(epubChapters[chapIndex], epubParagraphIndentLevel)
+                                            val formattedChapter = remember(textBookSections[chapIndex], epubParagraphIndentLevel) {
+                                                applyParagraphIndent(textBookSections[chapIndex], epubParagraphIndentLevel)
                                             }
                                             Text(
                                                 text = formattedChapter,
@@ -1487,7 +1568,7 @@ class MainActivity : ComponentActivity() {
                                             .fillMaxHeight()
                                             .fillMaxWidth(0.18f)
                                             .clickable {
-                                                if (pagerState.currentPage < epubChapters.size - 1) {
+                                                if (pagerState.currentPage < textBookSections.size - 1) {
                                                     scope.launch {
                                                         pagerState.animateScrollToPage(pagerState.currentPage + 1)
                                                     }
@@ -1512,7 +1593,7 @@ class MainActivity : ComponentActivity() {
                                                 OutlinedButton(
                                                     onClick = {
                                                         activeBook = null
-                                                        epubChapters = listOf()
+                                                        textBookSections = listOf()
                                                     },
                                                     border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
@@ -1535,7 +1616,7 @@ class MainActivity : ComponentActivity() {
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                     Text(
-                                                        text = "Section ${pagerState.currentPage + 1} of ${epubChapters.size}",
+                                                        text = "${currentBook.format} • Section ${pagerState.currentPage + 1} of ${textBookSections.size}",
                                                         style = MaterialTheme.typography.labelSmall,
                                                         color = ReadEraBarText.copy(alpha = 0.88f),
                                                         maxLines = 1
@@ -1734,8 +1815,8 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
 
-                                        val pct = ((pagerState.currentPage + 1) * 100) / epubChapters.size
-                                        val progFrac = ((pagerState.currentPage + 1).toFloat() / epubChapters.size.toFloat()).coerceIn(0f, 1f)
+                                        val pct = ((pagerState.currentPage + 1) * 100) / textBookSections.size
+                                        val progFrac = ((pagerState.currentPage + 1).toFloat() / textBookSections.size.toFloat()).coerceIn(0f, 1f)
                                         Column(
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
@@ -1775,7 +1856,7 @@ class MainActivity : ComponentActivity() {
                                                 }
 
                                                 Text(
-                                                    text = "${pagerState.currentPage + 1} of ${epubChapters.size} ($pct%)",
+                                                    text = "${pagerState.currentPage + 1} of ${textBookSections.size} ($pct%)",
                                                     style = MaterialTheme.typography.labelLarge,
                                                     fontWeight = FontWeight.Bold,
                                                     color = ReadEraBarText
@@ -1783,13 +1864,13 @@ class MainActivity : ComponentActivity() {
 
                                                 OutlinedButton(
                                                     onClick = {
-                                                        if (pagerState.currentPage < epubChapters.size - 1) {
+                                                        if (pagerState.currentPage < textBookSections.size - 1) {
                                                             scope.launch {
                                                                 pagerState.animateScrollToPage(pagerState.currentPage + 1)
                                                             }
                                                         }
                                                     },
-                                                    enabled = pagerState.currentPage < epubChapters.size - 1,
+                                                    enabled = pagerState.currentPage < textBookSections.size - 1,
                                                     border = BorderStroke(1.dp, ReadEraBarText.copy(alpha = 0.7f)),
                                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                                 ) {
@@ -2022,7 +2103,6 @@ class MainActivity : ComponentActivity() {
                                     .navigationBarsPadding()
                                     .padding(horizontal = 18.dp, vertical = 28.dp)
                             ) {
-                                // Lowered, spacious woody header bar with clear spacing between Menu, Title, and Overflow button
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
                                     color = WoodCardElevated.copy(alpha = 0.94f),
@@ -2096,9 +2176,7 @@ class MainActivity : ComponentActivity() {
                                                     text = { Text("Import Books", color = WoodEspressoInk) },
                                                     onClick = {
                                                         showOverflowMenu = false
-                                                        addBookLauncher.launch(
-                                                            arrayOf("application/pdf", "application/epub+zip", "*/*")
-                                                        )
+                                                        addBookLauncher.launch(arrayOf("*/*"))
                                                     }
                                                 )
                                                 DropdownMenuItem(
@@ -2159,7 +2237,7 @@ class MainActivity : ComponentActivity() {
                                 if (section == ReadEraSection.FORMATS) {
                                     Spacer(modifier = Modifier.height(12.dp))
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        items(listOf("ALL", "PDF", "EPUB")) { fmt ->
+                                        items(listOf("ALL", "PDF", "EPUB", "MOBI", "AZW", "AZW3", "FB2", "TXT", "DOCX")) { fmt ->
                                             OutlinedButton(
                                                 onClick = { formatFilter = fmt },
                                                 border = BorderStroke(1.dp, WoodAccentWalnut.copy(alpha = 0.5f)),
@@ -2190,7 +2268,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 } else if (section == ReadEraSection.COLLECTIONS) {
-                                    val colList = listOf("ALL", "General", "Documents", "Ebooks", "Scans")
+                                    val colList = listOf("ALL", "General", "Documents", "Ebooks", "Notes & Docs", "Scans")
                                     Spacer(modifier = Modifier.height(12.dp))
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         items(colList) { col ->
@@ -2313,7 +2391,7 @@ class MainActivity : ComponentActivity() {
                                             Text("e-Bookish", fontWeight = FontWeight.Bold, color = WoodEspressoInk)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "Includes Reading Now, Favorites, To Read, Have Read, Authors, Series, Collections, Formats, Folder Scanner, Trash & Restore, and Document Scanner.",
+                                                text = "Supports PDF, EPUB, MOBI, AZW/AZW3, FB2, TXT, and DOCX plus Folder Scanner, Trash & Restore, and Document Scanner.",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = WoodMutedInk
                                             )
@@ -2353,7 +2431,7 @@ class MainActivity : ComponentActivity() {
                                                     text = if (section == ReadEraSection.TRASH) {
                                                         "Trash is empty."
                                                     } else if (activeBooks.isEmpty()) {
-                                                        "No books yet.\nTap Menu -> Folders or Downloads to add PDFs and EPUBs."
+                                                        "No books yet.\nTap Menu -> Folders or Downloads to add PDF, EPUB, MOBI, AZW/AZW3, FB2, TXT, or DOCX files."
                                                     } else {
                                                         "No books in '${section.label}'."
                                                     },
@@ -2708,9 +2786,7 @@ class MainActivity : ComponentActivity() {
                                             }
                                             DrawerNavRow("Downloads", "DOWNLOADS") {
                                                 showDrawer = false
-                                                addBookLauncher.launch(
-                                                    arrayOf("application/pdf", "application/epub+zip", "*/*")
-                                                )
+                                                addBookLauncher.launch(arrayOf("*/*"))
                                             }
                                             DrawerNavRow("Doc Scanner", "BOOKS") {
                                                 showDrawer = false
@@ -2933,10 +3009,7 @@ class MainActivity : ComponentActivity() {
                                 queue.add(docId)
                             }
                         } else {
-                            val lower = name.lowercase()
-                            if (lower.endsWith(".pdf") || lower.endsWith(".epub") ||
-                                mime == "application/pdf" || mime.contains("epub")
-                            ) {
+                            if (detectBookFormat(name, mime) != null) {
                                 val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
                                 found.add(Pair(docUri, name))
                                 if (found.size - lastReported >= 5) {
@@ -3001,6 +3074,156 @@ class MainActivity : ComponentActivity() {
         return chapters
     }
 
+    private fun extractTxtSections(context: Context, uri: Uri): List<String> {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val bytes = stream.readBytes()
+                val text = String(bytes, Charset.forName("UTF-8"))
+                splitTextIntoSections(text)
+            } ?: listOf()
+        } catch (_: Exception) {
+            listOf()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun extractFb2Sections(context: Context, uri: Uri): List<String> {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val rawXml = String(stream.readBytes(), Charset.forName("UTF-8"))
+                val normalized = rawXml
+                    .replace(Regex("</p>|</div>|</section>|</title>|</subtitle>|</stanza>|</v>"), "\n\n")
+                    .replace(Regex("<br\\s*/?>"), "\n")
+                val plain = Html.fromHtml(normalized).toString()
+                splitTextIntoSections(plain)
+            } ?: listOf()
+        } catch (_: Exception) {
+            listOf()
+        }
+    }
+
+    private fun extractDocxSections(context: Context, uri: Uri): List<String> {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                ZipInputStream(inputStream).use { zip ->
+                    var docXml = ""
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory && entry.name.equals("word/document.xml", ignoreCase = true)) {
+                            docXml = String(zip.readBytes(), Charset.forName("UTF-8"))
+                            break
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                    if (docXml.isBlank()) return listOf()
+                    val cleaned = docXml
+                        .replace(Regex("</w:p>"), "\n\n")
+                        .replace(Regex("<w:tab\\s*/>"), "    ")
+                        .replace(Regex("<w:br\\s*/?>"), "\n")
+                        .replace(Regex("<[^>]+>"), "")
+                        .replace("&amp;", "&")
+                        .replace("&lt;", "<")
+                        .replace("&gt;", ">")
+                        .replace("&quot;", "\"")
+                        .replace("&apos;", "'")
+                    splitTextIntoSections(cleaned)
+                }
+            } ?: listOf()
+        } catch (_: Exception) {
+            listOf()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun extractMobiAzwSections(context: Context, uri: Uri): List<String> {
+        return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return listOf()
+            if (bytes.isEmpty()) return listOf()
+
+            // Check if KF8 / AZW3 contains an embedded EPUB/ZIP structure
+            val zipSignatureIdx = findSubsequence(bytes, byteArrayOf(0x50, 0x4B, 0x03, 0x04))
+            if (zipSignatureIdx >= 0 && zipSignatureIdx < bytes.size - 16) {
+                val subBytes = bytes.copyOfRange(zipSignatureIdx, bytes.size)
+                val embeddedChapters = mutableListOf<String>()
+                ZipInputStream(subBytes.inputStream()).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory) {
+                            val lower = entry.name.lowercase()
+                            if (lower.endsWith(".xhtml") || lower.endsWith(".html") || lower.endsWith(".htm")) {
+                                val htmlStr = String(zip.readBytes(), Charset.forName("UTF-8"))
+                                val plain = Html.fromHtml(htmlStr).toString()
+                                    .replace(Regex("\n{3,}"), "\n\n")
+                                    .trim()
+                                if (plain.isNotBlank()) embeddedChapters.add(plain)
+                            }
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
+                    }
+                }
+                if (embeddedChapters.isNotEmpty()) return embeddedChapters
+            }
+
+            // Extract readable text runs from PalmDOC / MOBI / AZW binary payload
+            val sb = StringBuilder()
+            var runStart = -1
+            for (i in bytes.indices) {
+                val b = bytes[i].toInt() and 0xFF
+                val isReadable = (b in 0x20..0x7E) || b == 0x0A || b == 0x0D || b == 0x09 || b >= 0xC0
+                if (isReadable) {
+                    if (runStart == -1) runStart = i
+                } else {
+                    if (runStart != -1 && i - runStart >= 24) {
+                        val chunk = String(bytes, runStart, i - runStart, Charset.forName("UTF-8"))
+                            .replace(Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]"), " ")
+                            .replace(Regex("[ ]{3,}"), " ")
+                            .trim()
+                        if (chunk.length >= 24 && !chunk.startsWith("BOOKMOBI") && !chunk.startsWith("EXTH")) {
+                            val decoded = if (chunk.contains("<") && chunk.contains(">")) {
+                                Html.fromHtml(chunk).toString().trim()
+                            } else {
+                                chunk
+                            }
+                            if (decoded.length >= 20) {
+                                if (sb.isNotEmpty()) sb.append("\n\n")
+                                sb.append(decoded)
+                            }
+                        }
+                    }
+                    runStart = -1
+                }
+            }
+            if (runStart != -1 && bytes.size - runStart >= 24) {
+                val chunk = String(bytes, runStart, bytes.size - runStart, Charset.forName("UTF-8")).trim()
+                if (chunk.length >= 20) {
+                    if (sb.isNotEmpty()) sb.append("\n\n")
+                    sb.append(chunk)
+                }
+            }
+
+            splitTextIntoSections(sb.toString())
+        } catch (_: Exception) {
+            listOf()
+        }
+    }
+
+    private fun findSubsequence(haystack: ByteArray, needle: ByteArray): Int {
+        if (needle.isEmpty() || haystack.size < needle.size) return -1
+        for (i in 0..(haystack.size - needle.size)) {
+            var match = true
+            for (j in needle.indices) {
+                if (haystack[i + j] != needle[j]) {
+                    match = false
+                    break
+                }
+            }
+            if (match) return i
+        }
+        return -1
+    }
+
     private fun saveBooks(context: Context, books: List<BookItem>) {
         val prefs = context.getSharedPreferences("ebookish_library", Context.MODE_PRIVATE)
         val arr = JSONArray()
@@ -3040,7 +3263,14 @@ class MainActivity : ComponentActivity() {
                         isFavorite = obj.optBoolean("isFavorite", false),
                         isTrashed = obj.optBoolean("isTrashed", false),
                         author = obj.optString("author", if (title.contains(" - ")) title.substringBefore(" - ").trim() else "Library"),
-                        collection = obj.optString("collection", if (fmt == "EPUB") "Ebooks" else "Documents"),
+                        collection = obj.optString(
+                            "collection",
+                            when (fmt) {
+                                "EPUB", "MOBI", "AZW", "AZW3", "FB2" -> "Ebooks"
+                                "TXT", "DOCX" -> "Notes & Docs"
+                                else -> "Documents"
+                            }
+                        ),
                         cover = null,
                         metadataLoaded = false
                     )
