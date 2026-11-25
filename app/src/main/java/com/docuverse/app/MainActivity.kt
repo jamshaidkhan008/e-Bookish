@@ -2474,3 +2474,9 @@ colorFilter = ColorMatrixColorFilter(cm)
 canvas.drawBitmap(src, 0f, 0f, paint)
 return out
 }
+enum class ScanFilterMode {
+    ORIGINAL,
+    DOC_BW,
+    MAGIC_COLOR,
+    GRAYSCALE
+}
